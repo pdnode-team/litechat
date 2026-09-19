@@ -1,4 +1,5 @@
 import type { Message, Ticket, UserRole } from '../types';
+import { wsOrigin } from './config';
 
 /**
  * Server -> client WebSocket payloads, mirroring what the backend hub broadcasts
@@ -70,9 +71,7 @@ export class TicketWebSocketClient {
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const url = `${protocol}//${host}/ws/tickets/${this.ticketId}${
+    const url = `${wsOrigin()}/ws/tickets/${this.ticketId}${
       this.token ? `?token=${encodeURIComponent(this.token)}` : ''
     }`;
 

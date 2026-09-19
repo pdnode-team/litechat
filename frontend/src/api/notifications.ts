@@ -7,11 +7,12 @@
  * has to poll.
  */
 
+import { wsOrigin } from './config';
+
 export interface RealtimeEvent {
   type: string;
   [key: string]: unknown;
 }
-
 export type RealtimeStatus = 'connecting' | 'open' | 'closed';
 
 type MessageHandler = (event: RealtimeEvent) => void;
@@ -63,8 +64,7 @@ export class NotificationSocketClient {
     this.token = this.token ?? localStorage.getItem('litechat_token');
     this.shouldReconnect = true;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${window.location.host}/ws/notifications${
+    const url = `${wsOrigin()}/ws/notifications${
       this.token ? `?token=${encodeURIComponent(this.token)}` : ''
     }`;
 

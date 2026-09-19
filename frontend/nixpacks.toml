@@ -1,0 +1,17 @@
+# Nixpacks build description for the LiteChat frontend.
+#
+# Point Dokploy's "Base Directory" for this application at `frontend`, set the
+# Build Type to Nixpacks, and set "Publish Directory" to `dist` so Dokploy serves
+# the built SPA with its nginx image.
+#
+# The SPA talks to its own origin, so no build-time API URL is needed when
+# /api and /ws are routed to the backend on the same domain.
+
+[phases.setup]
+nixPkgs = ["nodejs_22", "pnpm"]
+
+[phases.install]
+cmds = ["pnpm install --frozen-lockfile"]
+
+[phases.build]
+cmds = ["pnpm build"]

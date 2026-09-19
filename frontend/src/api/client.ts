@@ -18,9 +18,10 @@ import {
   EmailSettingsUpdate,
   NotificationSettingsUpdate,
 } from '../types';
+import { API_BASE_URL } from './config';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },

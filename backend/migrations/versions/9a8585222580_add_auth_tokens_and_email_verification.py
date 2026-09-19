@@ -45,7 +45,10 @@ def upgrade() -> None:
         )
     # Accounts created before email verification existed are treated as verified
     # rather than being asked to confirm an address they already registered with.
-    op.execute("UPDATE users SET email_verified = 1")
+    # Expressed through SQLAlchemy so the literal is correct for the dialect
+    # (`= 1` is invalid for a boolean column on PostgreSQL).
+    users = sa.table("users", sa.column("email_verified", sa.Boolean()))
+    op.execute(users.update().values(email_verified=True))
     with op.batch_alter_table('users', schema=None) as batch_op:
         batch_op.alter_column('email_verified', server_default=None)
 
