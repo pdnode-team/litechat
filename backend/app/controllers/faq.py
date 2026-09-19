@@ -103,6 +103,16 @@ class FaqController(Controller):
     async def query_faq_engine(self, data: FaqQueryRequest) -> FaqQueryResponse:
         query_str = data.query.strip().lower()
         query_words = _tokenize(query_str)
+
+        # The whole-query bonus is only meaningful when the query carries at
+        # least one significant token, and it must match on word boundaries.
+        # Without both guards a one-letter or stopword-only query ("a", "can")
+        # scores +10 against every article, because it is a raw substring of
+        # words like "cancel".
+        phrase_pattern = (
+            re.compile(rf"\b{re.escape(query_str)}\b") if query_words else None
+        )
+
         async with async_session_factory() as session:
             stmt = select(FaqItem).where(FaqItem.is_active.is_(True))
             if data.category:
@@ -119,24 +129,27 @@ class FaqController(Controller):
                 q_tokens = set(_tokenize(item.question))
                 kw_tokens = set(_tokenize(item.keywords or ""))
                 ans_tokens = set(_tokenize(item.answer))
-                haystack = q_tokens | kw_tokens | ans_tokens
 
                 score = 0
-                if query_str and query_str in item.question.lower():
+                if phrase_pattern and phrase_pattern.search(item.question.lower()):
                     score += 10
-                if query_str and query_str in (item.keywords or "").lower():
+                if phrase_pattern and phrase_pattern.search((item.keywords or "").lower()):
                     score += 8
 
                 for word in query_words:
-                    if word in q_tokens:
+                    # Tolerate simple plurals without a full stemmer: a query of
+                    # "refunds" should reach an article keyworded "refund", and
+                    # vice versa. Each field scores at most once per word.
+                    variants = {word}
+                    if len(word) > 3:
+                        variants.add(word[:-1] if word.endswith("s") else f"{word}s")
+
+                    if variants & q_tokens:
                         score += 4
-                    if word in kw_tokens:
+                    if variants & kw_tokens:
                         score += 4
-                    if word in ans_tokens:
+                    if variants & ans_tokens:
                         score += 1
-                    # Tolerate simple plurals/inflections without full stemming.
-                    if word.endswith("s") and word[:-1] in haystack:
-                        score += 2
 
                 if score > 0:
                     matches.append((score, item))
