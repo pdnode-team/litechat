@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# --- Secrets: NEVER commit these ---
+# Auto-generated development JWT signing key (grants full auth forgery if leaked)
+.jwt_secret
+.env
+.env.*
+
+# --- Local state / user data ---
+# SQLite database (contains real user records)
+*.db
+*.sqlite
+*.sqlite3
+# Uploaded customer attachments (contain PII)
+uploads/
+
+# --- Test / tooling artifacts ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tests/*.db

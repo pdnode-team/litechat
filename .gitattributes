@@ -1,0 +1,18 @@
+# Normalize line endings: store LF, check out LF everywhere.
+* text=auto eol=lf
+
+# Binary assets must never be converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+
+# Lockfiles are generated; keep them out of diffs/review noise.
+pnpm-lock.yaml linguist-generated=true
+uv.lock linguist-generated=true

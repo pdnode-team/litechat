@@ -1,0 +1,40 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "BretRen", email = "bretren2013@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "bcrypt>=5.0.0",
+    "email-validator>=2.3.0",
+    "httpx>=0.28.1",
+    "litestar>=2.24.0",
+    "pydantic>=2.13.5",
+    "pyjwt>=2.14.0",
+    "python-multipart>=0.0.32",
+    "sqlalchemy>=2.0.54",
+    "uvicorn>=0.53.0",
+    "websockets>=17.1",
+]
+
+[project.scripts]
+backend = "backend:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+

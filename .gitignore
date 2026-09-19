@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────
+# LiteChat monorepo — applies to backend/ and frontend/
+# ─────────────────────────────────────────────────────────────
+
+# ── Secrets: never commit ────────────────────────────────────
+.env
+.env.*
+!.env.example
+# Auto-generated development JWT signing key (forging tokens if leaked)
+.jwt_secret
+*.pem
+*.key
+
+# ── Local data / user content ────────────────────────────────
+# SQLite databases hold real user records
+*.db
+*.sqlite
+*.sqlite3
+# Uploaded customer attachments (contain PII)
+uploads/
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[oc]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+wheels/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── Node / Vite ──────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+*.local
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Editors / OS ─────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.njsproj
+*.sln
+*.sw?
