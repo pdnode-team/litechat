@@ -16,6 +16,8 @@
 *.db
 *.sqlite
 *.sqlite3
+# Pre-migration database backups
+*.db.bak*
 # Uploaded customer attachments (contain PII)
 uploads/
 
