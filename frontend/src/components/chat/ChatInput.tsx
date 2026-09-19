@@ -22,13 +22,13 @@ export const ChatInput: React.FC<Props> = ({ onSendMessage, onTyping, userRole, 
   const [showCanned, setShowCanned] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const typingTimerRef = useRef<any>(null);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canWhisper = userRole === 'agent' || userRole === 'admin';
 
   useEffect(() => {
     if (canWhisper) {
-      cannedApi.list().then(setCannedList).catch(console.warn);
+      cannedApi.listAll().then(setCannedList).catch(console.warn);
     }
   }, [canWhisper]);
 
@@ -187,6 +187,7 @@ export const ChatInput: React.FC<Props> = ({ onSendMessage, onTyping, userRole, 
               <button
                 type="button"
                 onClick={() => setAttachments(attachments.filter((_, i) => i !== idx))}
+                aria-label={`Remove attachment ${att.name}`}
                 className="text-zinc-500 hover:text-zinc-300"
               >
                 <X className="w-3 h-3" />
@@ -230,6 +231,7 @@ export const ChatInput: React.FC<Props> = ({ onSendMessage, onTyping, userRole, 
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || uploading}
+            aria-label="Attach file"
             title="Attach file"
             className="p-2 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
           >
@@ -240,6 +242,7 @@ export const ChatInput: React.FC<Props> = ({ onSendMessage, onTyping, userRole, 
             type="button"
             onClick={handleSend}
             disabled={disabled || sending || (!content.trim() && attachments.length === 0)}
+            aria-label={messageType === 'whisper' ? 'Send internal note' : 'Send message'}
             className={`p-2 rounded-lg font-medium shadow-sm transition disabled:opacity-40 ${
               messageType === 'whisper'
                 ? 'bg-amber-500 text-zinc-950 hover:bg-amber-400'

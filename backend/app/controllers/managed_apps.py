@@ -1,10 +1,14 @@
-from typing import List, Optional
+from typing import Annotated, Optional
 from litestar import Controller, get, post, put, delete, Request
 from litestar.exceptions import NotAuthorizedException, PermissionDeniedException, NotFoundException, ValidationException
-from sqlalchemy import select
+from litestar.params import PathParameter, QueryParameter
+from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from app.db.session import async_session_factory
 from app.models.managed_app import ManagedApp
+from app.models.ticket import Ticket
 from app.schemas.managed_app import ManagedAppCreate, ManagedAppUpdate, ManagedAppResponse
+from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
 
 def app_to_response(app: ManagedApp) -> ManagedAppResponse:
@@ -22,18 +26,36 @@ class ManagedAppController(Controller):
     path = "/api/apps"
 
     @get("/")
-    async def list_apps(self, request: Request, active_only: Optional[bool] = None) -> List[ManagedAppResponse]:
+    async def list_apps(
+        self,
+        request: Request,
+        active_only: Annotated[Optional[bool], QueryParameter()] = None,
+        limit: LimitParam = DEFAULT_PAGE_SIZE,
+        offset: OffsetParam = 0,
+    ) -> Page[ManagedAppResponse]:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
 
         async with async_session_factory() as session:
-            stmt = select(ManagedApp).order_by(ManagedApp.id.asc())
+            filters = []
             if active_only:
-                stmt = stmt.where(ManagedApp.is_active.is_(True))
+                filters.append(ManagedApp.is_active.is_(True))
+
+            total = (
+                await session.execute(select(func.count()).select_from(ManagedApp).where(*filters))
+            ).scalar_one()
+
+            stmt = (
+                select(ManagedApp)
+                .where(*filters)
+                .order_by(ManagedApp.id.asc())
+                .limit(limit)
+                .offset(offset)
+            )
             result = await session.execute(stmt)
-            apps = result.scalars().all()
-            return [app_to_response(a) for a in apps]
+            items = [app_to_response(a) for a in result.scalars().all()]
+            return Page[ManagedAppResponse](items=items, total=total, limit=limit, offset=offset)
 
     @post("/")
     async def create_app(self, request: Request, data: ManagedAppCreate) -> ManagedAppResponse:
@@ -61,7 +83,7 @@ class ManagedAppController(Controller):
             return app_to_response(new_app)
 
     @put("/{app_id:int}")
-    async def update_app(self, request: Request, app_id: int, data: ManagedAppUpdate) -> ManagedAppResponse:
+    async def update_app(self, request: Request, app_id: Annotated[int, PathParameter()], data: ManagedAppUpdate) -> ManagedAppResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -87,7 +109,7 @@ class ManagedAppController(Controller):
             return app_to_response(app)
 
     @delete("/{app_id:int}")
-    async def delete_app(self, request: Request, app_id: int) -> None:
+    async def delete_app(self, request: Request, app_id: Annotated[int, PathParameter()]) -> None:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -99,12 +121,18 @@ class ManagedAppController(Controller):
             if not app:
                 raise NotFoundException("Application not found.")
 
-            from app.models.ticket import Ticket
-            from sqlalchemy import func
+            # Pre-check for a friendly message; the commit below is the real
+            # guard because a ticket can be created between the two statements.
             count_res = await session.execute(select(func.count(Ticket.id)).where(Ticket.app_id == app_id))
             used_count = count_res.scalar_one()
             if used_count > 0:
                 raise ValidationException(f"Cannot delete application: {used_count} ticket(s) are currently associated with it.")
 
             await session.delete(app)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                raise ValidationException(
+                    "Cannot delete application: tickets were associated with it while it was being removed."
+                ) from None

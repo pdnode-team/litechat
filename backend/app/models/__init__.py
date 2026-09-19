@@ -6,6 +6,11 @@ from app.models.csat_rating import CSATRating
 from app.models.managed_app import ManagedApp
 from app.models.ticket_type import TicketType
 from app.models.faq_item import FaqItem
+from app.models.auth_token import (
+    AuthToken,
+    PURPOSE_EMAIL_VERIFICATION,
+    PURPOSE_PASSWORD_RESET,
+)
 
 __all__ = [
     "User",
@@ -16,4 +21,7 @@ __all__ = [
     "ManagedApp",
     "TicketType",
     "FaqItem",
+    "AuthToken",
+    "PURPOSE_PASSWORD_RESET",
+    "PURPOSE_EMAIL_VERIFICATION",
 ]

@@ -13,3 +13,6 @@ class User(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String(50), default="customer", nullable=False)  # customer, agent, admin
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Advisory flag: an unverified address still logs in, it only surfaces a
+    # banner prompting the user to confirm their email.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

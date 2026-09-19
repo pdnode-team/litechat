@@ -1,4 +1,53 @@
-export type WebSocketEventHandler = (data: any) => void;
+import type { Message, Ticket, UserRole } from '../types';
+
+/**
+ * Server -> client WebSocket payloads, mirroring what the backend hub broadcasts
+ * (see backend/app/services/websocket_hub.py, controllers/messages.py,
+ * controllers/tickets.py and controllers/websocket.py).
+ */
+export interface WsNewMessage {
+  type: 'new_message';
+  message: Message;
+}
+
+export interface WsTicketUpdated {
+  type: 'ticket_updated';
+  ticket: Ticket;
+}
+
+export interface WsTyping {
+  type: 'typing';
+  user_id: number;
+  user_name: string;
+  is_typing: boolean;
+}
+
+export interface WsPresence {
+  type: 'presence';
+  event: 'joined' | 'left';
+  user_id: number;
+  user_name: string;
+  role: UserRole;
+}
+
+export type WebSocketMessage = WsNewMessage | WsTicketUpdated | WsTyping | WsPresence;
+
+/**
+ * Runtime guard for raw JSON frames. Frames that do not match a known shape are
+ * dropped by the client, so consumers only ever receive `WebSocketMessage`.
+ */
+export function isWsMessage(value: unknown): value is WebSocketMessage {
+  if (typeof value !== 'object' || value === null) return false;
+  const type = (value as { type?: unknown }).type;
+  return (
+    type === 'new_message' ||
+    type === 'ticket_updated' ||
+    type === 'typing' ||
+    type === 'presence'
+  );
+}
+
+export type WebSocketEventHandler = (data: WebSocketMessage) => void;
 
 export class TicketWebSocketClient {
   private ticketId: number;
@@ -6,7 +55,7 @@ export class TicketWebSocketClient {
   private token: string | null;
   private handlers: Set<WebSocketEventHandler> = new Set();
   private shouldReconnect: boolean = true;
-  private reconnectTimeout: any = null;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
@@ -37,8 +86,9 @@ export class TicketWebSocketClient {
 
       this.ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          this.handlers.forEach((h) => h(data));
+          const parsed: unknown = JSON.parse(event.data);
+          if (!isWsMessage(parsed)) return;
+          this.handlers.forEach((h) => h(parsed));
         } catch (err) {
           console.error('[WS] Failed to parse message', err);
         }
@@ -86,8 +136,9 @@ export class TicketWebSocketClient {
 
   public disconnect(): void {
     this.shouldReconnect = false;
-    if (this.reconnectTimeout) {
+    if (this.reconnectTimeout !== null) {
       clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
     }
     if (this.ws) {
       this.ws.close();

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import json
 import secrets
 import uuid
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from litestar import Controller, get, post, patch, Request
 from litestar.exceptions import (
     NotAuthorizedException,
@@ -10,19 +10,27 @@ from litestar.exceptions import (
     NotFoundException,
     ValidationException,
 )
-from sqlalchemy import select, or_, desc
+from litestar.params import PathParameter, QueryParameter
+from sqlalchemy import select, or_, desc, func
 from app.db.session import async_session_factory
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.models.message import Message
 from app.models.managed_app import ManagedApp
 from app.models.ticket_type import TicketType
+from app.schemas.pagination import (
+    DEFAULT_PAGE_SIZE,
+    LimitParam,
+    OffsetParam,
+    Page,
+)
 from app.schemas.ticket import (
     TicketCreate,
     TicketResponse,
     TicketStatusUpdateRequest,
     TicketAssignRequest,
     TicketPriorityUpdateRequest,
+    TicketUpdateRequest,
 )
 from app.schemas.auth import UserResponse
 from app.controllers.auth import get_current_user_from_request
@@ -156,34 +164,36 @@ class TicketController(Controller):
     async def list_tickets(
         self,
         request: Request,
-        status: Optional[str] = None,
-        priority: Optional[str] = None,
-        category: Optional[str] = None,
-        search: Optional[str] = None,
-        assigned_to_me: Optional[bool] = None,
-    ) -> List[TicketResponse]:
+        status: Annotated[Optional[str], QueryParameter()] = None,
+        priority: Annotated[Optional[str], QueryParameter()] = None,
+        category: Annotated[Optional[str], QueryParameter()] = None,
+        search: Annotated[Optional[str], QueryParameter()] = None,
+        assigned_to_me: Annotated[Optional[bool], QueryParameter()] = None,
+        limit: LimitParam = DEFAULT_PAGE_SIZE,
+        offset: OffsetParam = 0,
+    ) -> Page[TicketResponse]:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
 
         async with async_session_factory() as session:
-            stmt = select(Ticket).order_by(desc(Ticket.created_at))
-
+            # Build the filter set once so the total and the page always agree.
+            filters = []
             # Strictly enforce: Customers see ONLY their own tickets
             if current_user.role == "customer":
-                stmt = stmt.where(Ticket.customer_id == current_user.id)
+                filters.append(Ticket.customer_id == current_user.id)
             elif assigned_to_me and current_user.role in ("agent", "admin"):
-                stmt = stmt.where(Ticket.assigned_agent_id == current_user.id)
+                filters.append(Ticket.assigned_agent_id == current_user.id)
 
             if status:
-                stmt = stmt.where(Ticket.status == status)
+                filters.append(Ticket.status == status)
             if priority:
-                stmt = stmt.where(Ticket.priority == priority)
+                filters.append(Ticket.priority == priority)
             if category:
-                stmt = stmt.where(Ticket.category == category)
+                filters.append(Ticket.category == category)
             if search:
                 term = f"%{search.strip()}%"
-                stmt = stmt.where(
+                filters.append(
                     or_(
                         Ticket.title.ilike(term),
                         Ticket.ticket_code.ilike(term),
@@ -191,8 +201,18 @@ class TicketController(Controller):
                     )
                 )
 
-            tickets_res = await session.execute(stmt)
-            tickets = tickets_res.scalars().all()
+            total = (
+                await session.execute(select(func.count()).select_from(Ticket).where(*filters))
+            ).scalar_one()
+
+            stmt = (
+                select(Ticket)
+                .where(*filters)
+                .order_by(desc(Ticket.created_at), desc(Ticket.id))
+                .limit(limit)
+                .offset(offset)
+            )
+            tickets = (await session.execute(stmt)).scalars().all()
 
             user_ids = set()
             app_ids = set()
@@ -224,7 +244,7 @@ class TicketController(Controller):
                 for tt in types_res.scalars().all():
                     types_map[tt.id] = tt
 
-            return [
+            items = [
                 build_ticket_response(
                     t,
                     customer=users_map.get(t.customer_id),
@@ -235,8 +255,10 @@ class TicketController(Controller):
                 for t in tickets
             ]
 
+            return Page[TicketResponse](items=items, total=total, limit=limit, offset=offset)
+
     @get("/{ticket_id:int}")
-    async def get_ticket(self, request: Request, ticket_id: int) -> TicketResponse:
+    async def get_ticket(self, request: Request, ticket_id: Annotated[int, PathParameter()]) -> TicketResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -263,8 +285,77 @@ class TicketController(Controller):
                 ticket_type=ticket_type,
             )
 
+    @patch("/{ticket_id:int}")
+    async def update_ticket(
+        self,
+        request: Request,
+        ticket_id: Annotated[int, PathParameter()],
+        data: TicketUpdateRequest,
+    ) -> TicketResponse:
+        """Edit the ticket's descriptive fields (title, description, category, tags, URL)."""
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise NotAuthorizedException("Authentication required.")
+
+        async with async_session_factory() as session:
+            ticket = await session.get(Ticket, ticket_id)
+            if not ticket:
+                raise NotFoundException("Ticket not found.")
+
+            if current_user.role == "customer" and ticket.customer_id != current_user.id:
+                raise PermissionDeniedException("Forbidden: You cannot modify this ticket.")
+
+            if ticket.status in ("closed",) and current_user.role == "customer":
+                raise ValidationException("This ticket is closed. Reopen it before editing.")
+
+            changes = []
+            if data.title is not None and data.title.strip() != ticket.title:
+                changes.append(f"title -> '{data.title.strip()}'")
+                ticket.title = data.title.strip()
+            if data.description is not None and data.description.strip() != ticket.description:
+                changes.append("description updated")
+                ticket.description = data.description.strip()
+            if data.category is not None and data.category != ticket.category:
+                changes.append(f"category {ticket.category} -> {data.category}")
+                ticket.category = data.category
+            if data.tags is not None and data.tags != (ticket.tags or ""):
+                changes.append("tags updated")
+                ticket.tags = data.tags
+            if data.target_url is not None:
+                new_url = data.target_url.strip() or None
+                if new_url != ticket.target_url:
+                    changes.append("target URL updated")
+                    ticket.target_url = new_url
+
+            if changes:
+                session.add(
+                    Message(
+                        ticket_id=ticket.id,
+                        sender_id=current_user.id,
+                        sender_name=current_user.full_name,
+                        sender_role="system",
+                        message_type="action_card",
+                        content=f"Ticket details edited by {current_user.full_name}: {', '.join(changes)}",
+                    )
+                )
+                await session.commit()
+                await session.refresh(ticket)
+
+            customer = await session.get(User, ticket.customer_id)
+            agent = await session.get(User, ticket.assigned_agent_id) if ticket.assigned_agent_id else None
+            app = await session.get(ManagedApp, ticket.app_id) if ticket.app_id else None
+            ticket_type = await session.get(TicketType, ticket.ticket_type_id) if ticket.ticket_type_id else None
+            resp = build_ticket_response(ticket, customer=customer, agent=agent, app=app, ticket_type=ticket_type)
+
+            if changes:
+                await hub.broadcast(
+                    ticket.id,
+                    {"type": "ticket_updated", "ticket": resp.model_dump(mode="json")},
+                )
+            return resp
+
     @patch("/{ticket_id:int}/status")
-    async def update_status(self, request: Request, ticket_id: int, data: TicketStatusUpdateRequest) -> TicketResponse:
+    async def update_status(self, request: Request, ticket_id: Annotated[int, PathParameter()], data: TicketStatusUpdateRequest) -> TicketResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -322,7 +413,7 @@ class TicketController(Controller):
             return resp
 
     @patch("/{ticket_id:int}/assign")
-    async def assign_ticket(self, request: Request, ticket_id: int, data: TicketAssignRequest) -> TicketResponse:
+    async def assign_ticket(self, request: Request, ticket_id: Annotated[int, PathParameter()], data: TicketAssignRequest) -> TicketResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -373,7 +464,7 @@ class TicketController(Controller):
             return resp
 
     @patch("/{ticket_id:int}/priority")
-    async def update_priority(self, request: Request, ticket_id: int, data: TicketPriorityUpdateRequest) -> TicketResponse:
+    async def update_priority(self, request: Request, ticket_id: Annotated[int, PathParameter()], data: TicketPriorityUpdateRequest) -> TicketResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")

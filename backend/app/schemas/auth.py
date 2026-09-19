@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import ConfigDict, BaseModel, EmailStr, Field, field_validator
 
 def validate_password_strength(v: str) -> str:
     if len(v) < 8:
@@ -36,6 +36,30 @@ class SetupAdminRequest(BaseModel):
     def check_password(cls, v: str) -> str:
         return validate_password_strength(v)
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=10)
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def check_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=10)
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def check_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
 class UserResponse(BaseModel):
     id: int
     email: str
@@ -44,10 +68,10 @@ class UserResponse(BaseModel):
     role: str
     avatar_url: Optional[str] = None
     is_active: bool
+    email_verified: bool = False
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TokenResponse(BaseModel):
     access_token: str

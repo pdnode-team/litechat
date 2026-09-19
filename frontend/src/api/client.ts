@@ -11,6 +11,9 @@ import {
   TicketType,
   FaqItem,
   FaqQueryResult,
+  CustomFieldDefinition,
+  Page,
+  PageParams,
 } from '../types';
 
 const api = axios.create({
@@ -19,6 +22,29 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+/** Largest page the API will serve; used when a caller wants a whole catalogue. */
+const MAX_PAGE_SIZE = 200;
+
+/**
+ * Walk every page of a list endpoint.
+ *
+ * Only for small catalogues used to populate dropdowns (apps, ticket types,
+ * canned responses). Anything user-scalable must page explicitly instead.
+ */
+const collectAll = async <T>(fetchPage: (offset: number) => Promise<Page<T>>): Promise<T[]> => {
+  const all: T[] = [];
+  let offset = 0;
+
+  for (;;) {
+    const page = await fetchPage(offset);
+    all.push(...page.items);
+    offset += page.items.length;
+    if (page.items.length === 0 || all.length >= page.total) break;
+  }
+
+  return all;
+};
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('litechat_token');
@@ -96,11 +122,43 @@ export const authApi = {
     const res = await api.get<User>('/auth/me');
     return res.data;
   },
+  forgotPassword: async (email: string) => {
+    const res = await api.post<{ detail: string }>('/auth/forgot-password', { email });
+    return res.data;
+  },
+  resetPassword: async (token: string, new_password: string) => {
+    const res = await api.post<{ detail: string }>('/auth/reset-password', { token, new_password });
+    return res.data;
+  },
+  verifyEmail: async (token: string) => {
+    const res = await api.post<{ detail: string }>('/auth/verify-email', { token });
+    return res.data;
+  },
+  resendVerification: async () => {
+    const res = await api.post<{ detail: string }>('/auth/resend-verification');
+    return res.data;
+  },
+  changePassword: async (current_password: string, new_password: string) => {
+    const res = await api.post<{ detail: string }>('/auth/change-password', {
+      current_password,
+      new_password,
+    });
+    return res.data;
+  },
 };
 
 export const usersApi = {
-  list: async (role?: string) => {
-    const res = await api.get<User[]>('/users', { params: role ? { role } : undefined });
+  list: async (
+    params?: { role?: string; search?: string } & PageParams
+  ): Promise<Page<User>> => {
+    const res = await api.get<Page<User>>('/users', { params });
+    return res.data;
+  },
+  listAll: async (params?: { role?: string; search?: string }): Promise<User[]> =>
+    collectAll((offset) => usersApi.list({ ...params, limit: MAX_PAGE_SIZE, offset })),
+  /** Active staff an agent may assign tickets to (available to agent and admin). */
+  listAssignable: async () => {
+    const res = await api.get<User[]>('/users/assignable');
     return res.data;
   },
   updateRole: async (userId: number, role: 'customer' | 'agent' | 'admin') => {
@@ -114,12 +172,14 @@ export const usersApi = {
 };
 
 export const appsApi = {
-  list: async (activeOnly?: boolean) => {
-    const res = await api.get<ManagedApp[]>('/apps', {
-      params: activeOnly ? { active_only: true } : undefined,
-    });
+  list: async (params?: { active_only?: boolean } & PageParams): Promise<Page<ManagedApp>> => {
+    const res = await api.get<Page<ManagedApp>>('/apps', { params });
     return res.data;
   },
+  listAll: async (activeOnly?: boolean): Promise<ManagedApp[]> =>
+    collectAll((offset) =>
+      appsApi.list({ active_only: activeOnly, limit: MAX_PAGE_SIZE, offset })
+    ),
   create: async (data: { name: string; code: string; base_url?: string; is_active?: boolean }) => {
     const res = await api.post<ManagedApp>('/apps', data);
     return res.data;
@@ -134,17 +194,19 @@ export const appsApi = {
 };
 
 export const ticketTypesApi = {
-  list: async (activeOnly?: boolean) => {
-    const res = await api.get<TicketType[]>('/ticket-types', {
-      params: activeOnly ? { active_only: true } : undefined,
-    });
+  list: async (params?: { active_only?: boolean } & PageParams): Promise<Page<TicketType>> => {
+    const res = await api.get<Page<TicketType>>('/ticket-types', { params });
     return res.data;
   },
+  listAll: async (activeOnly?: boolean): Promise<TicketType[]> =>
+    collectAll((offset) =>
+      ticketTypesApi.list({ active_only: activeOnly, limit: MAX_PAGE_SIZE, offset })
+    ),
   create: async (data: {
     name: string;
     code: string;
     description?: string;
-    fields_schema?: any[];
+    fields_schema?: CustomFieldDefinition[];
     is_active?: boolean;
   }) => {
     const res = await api.post<TicketType>('/ticket-types', data);
@@ -160,10 +222,18 @@ export const ticketTypesApi = {
 };
 
 export const faqApi = {
-  list: async (params?: { category?: string; search?: string; active_only?: boolean }) => {
-    const res = await api.get<FaqItem[]>('/faq', { params });
+  list: async (
+    params?: { category?: string; search?: string; active_only?: boolean } & PageParams
+  ): Promise<Page<FaqItem>> => {
+    const res = await api.get<Page<FaqItem>>('/faq', { params });
     return res.data;
   },
+  listAll: async (params?: {
+    category?: string;
+    search?: string;
+    active_only?: boolean;
+  }): Promise<FaqItem[]> =>
+    collectAll((offset) => faqApi.list({ ...params, limit: MAX_PAGE_SIZE, offset })),
   query: async (query: string, category?: string) => {
     const res = await api.post<FaqQueryResult>('/faq/query', { query, category });
     return res.data;
@@ -190,14 +260,16 @@ export const faqApi = {
 };
 
 export const ticketsApi = {
-  list: async (params?: {
-    status?: string;
-    priority?: string;
-    category?: string;
-    search?: string;
-    assigned_to_me?: boolean;
-  }) => {
-    const res = await api.get<Ticket[]>('/tickets', { params });
+  list: async (
+    params?: {
+      status?: string;
+      priority?: string;
+      category?: string;
+      search?: string;
+      assigned_to_me?: boolean;
+    } & PageParams
+  ): Promise<Page<Ticket>> => {
+    const res = await api.get<Page<Ticket>>('/tickets', { params });
     return res.data;
   },
   get: async (ticketId: number) => {
@@ -213,9 +285,22 @@ export const ticketsApi = {
     app_id?: number;
     target_url?: string;
     ticket_type_id?: number;
-    custom_fields?: Record<string, any>;
+    custom_fields?: Record<string, unknown>;
   }) => {
     const res = await api.post<Ticket>('/tickets', data);
+    return res.data;
+  },
+  update: async (
+    ticketId: number,
+    data: {
+      title?: string;
+      description?: string;
+      category?: string;
+      tags?: string;
+      target_url?: string;
+    }
+  ) => {
+    const res = await api.patch<Ticket>(`/tickets/${ticketId}`, data);
     return res.data;
   },
   updateStatus: async (ticketId: number, status: string) => {
@@ -233,8 +318,12 @@ export const ticketsApi = {
 };
 
 export const messagesApi = {
-  list: async (ticketId: number) => {
-    const res = await api.get<Message[]>(`/tickets/${ticketId}/messages`);
+  /**
+   * Page 0 holds the newest messages, each page still in chronological order,
+   * so a page can be prepended directly when loading older history.
+   */
+  list: async (ticketId: number, params?: PageParams): Promise<Page<Message>> => {
+    const res = await api.get<Page<Message>>(`/tickets/${ticketId}/messages`, { params });
     return res.data;
   },
   send: async (
@@ -257,10 +346,12 @@ export const messagesApi = {
 };
 
 export const cannedApi = {
-  list: async () => {
-    const res = await api.get<CannedResponse[]>('/canned-responses');
+  list: async (params?: PageParams): Promise<Page<CannedResponse>> => {
+    const res = await api.get<Page<CannedResponse>>('/canned-responses', { params });
     return res.data;
   },
+  listAll: async (): Promise<CannedResponse[]> =>
+    collectAll((offset) => cannedApi.list({ limit: MAX_PAGE_SIZE, offset })),
   create: async (data: { shortcut: string; title: string; content: string; category: string }) => {
     const res = await api.post<CannedResponse>('/canned-responses', data);
     return res.data;

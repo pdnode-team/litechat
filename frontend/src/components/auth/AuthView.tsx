@@ -1,22 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { authApi } from '../../api/client';
-import { ArrowRight, Lock, Mail, ShieldAlert } from 'lucide-react';
+import { apiErrorMessage } from '../../utils/errors';
+import { ArrowRight, Lock, Mail, MailCheck, ShieldAlert } from 'lucide-react';
 
-type Mode = 'login' | 'register' | 'setup';
-
-/** Litestar returns a plain string for our errors, but an array for 422 validation. */
-const errorText = (err: any, fallback: string): string => {
-  const detail = err?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail) && detail.length > 0) return detail[0]?.msg ?? fallback;
-  return fallback;
-};
+type Mode = 'login' | 'register' | 'setup' | 'forgot';
 
 export const AuthView: React.FC = () => {
   const { login, register, setupAdmin } = useAuth();
   const [mode, setMode] = useState<Mode>('login');
   const [checkingDeployment, setCheckingDeployment] = useState(true);
+  const [forgotSent, setForgotSent] = useState(false);
 
   // Login fields
   const [identifier, setIdentifier] = useState('');
@@ -59,8 +53,8 @@ export const AuthView: React.FC = () => {
     setError(null);
     try {
       await login(identifier, password);
-    } catch (err: any) {
-      setError(errorText(err, 'Invalid username or password.'));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Invalid username or password.'));
     } finally {
       setLoading(false);
     }
@@ -73,8 +67,8 @@ export const AuthView: React.FC = () => {
     setError(null);
     try {
       await register(email, username, fullName, regPassword);
-    } catch (err: any) {
-      setError(errorText(err, 'Registration failed. Email or username may already exist.'));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Registration failed. Email or username may already exist.'));
     } finally {
       setLoading(false);
     }
@@ -87,21 +81,46 @@ export const AuthView: React.FC = () => {
     setError(null);
     try {
       await setupAdmin(email, username, fullName, regPassword);
-    } catch (err: any) {
-      setError(errorText(err, 'Could not create the administrator account.'));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not create the administrator account.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await authApi.forgotPassword(email);
+      // The API always reports success so it cannot be used to discover
+      // which addresses have accounts.
+      setForgotSent(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not request a reset link.'));
     } finally {
       setLoading(false);
     }
   };
 
   const heading =
-    mode === 'setup' ? 'Initialize LiteChat' : mode === 'register' ? 'Create Account' : 'Sign in to LiteChat';
+    mode === 'setup'
+      ? 'Initialize LiteChat'
+      : mode === 'register'
+      ? 'Create Account'
+      : mode === 'forgot'
+      ? 'Reset your password'
+      : 'Sign in to LiteChat';
 
   const subheading =
     mode === 'setup'
       ? 'This deployment has no accounts yet. The account created here becomes the administrator.'
       : mode === 'register'
       ? 'New accounts are created as Customers.'
+      : mode === 'forgot'
+      ? 'We will email you a single-use link to choose a new password.'
       : 'Enter your credentials to access your support workspace.';
 
   const accountForm = mode === 'setup' ? handleSetupAdmin : handleRegister;
@@ -141,6 +160,69 @@ export const AuthView: React.FC = () => {
             <div className="py-6 text-center text-xs font-mono text-zinc-500">
               Checking deployment state...
             </div>
+          ) : mode === 'forgot' ? (
+            forgotSent ? (
+              <div className="text-center py-4">
+                <div className="w-10 h-10 bg-emerald-950/80 border border-emerald-800 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <MailCheck className="w-5 h-5" />
+                </div>
+                <p className="text-xs text-zinc-300 mb-1">Check your inbox.</p>
+                <p className="text-[11px] text-zinc-500 mb-4">
+                  If an account exists for that address, a reset link is on its way. The link can
+                  only be used once.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setForgotSent(false);
+                    setError(null);
+                  }}
+                  className="text-xs text-zinc-400 hover:text-zinc-200 transition"
+                >
+                  Back to sign in
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-mono text-zinc-400 mb-1 uppercase tracking-wider">
+                    Email
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="alex@example.com"
+                      className="w-full text-xs pl-9 pr-3 py-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 transition"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-2.5 px-4 bg-zinc-100 hover:bg-white text-zinc-900 text-xs font-semibold rounded-lg transition shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  {loading ? 'Sending...' : 'Send reset link'}
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setError(null);
+                  }}
+                  className="w-full text-xs text-zinc-400 hover:text-zinc-200 transition"
+                >
+                  Back to sign in
+                </button>
+              </form>
+            )
           ) : mode === 'login' ? (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
@@ -261,19 +343,34 @@ export const AuthView: React.FC = () => {
           )}
 
           {/* Mode switches */}
-          {!checkingDeployment && (
+          {!checkingDeployment && mode !== 'forgot' && (
             <div className="mt-5 pt-4 border-t border-zinc-800/80 text-center space-y-2">
               {mode === 'login' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('register');
-                    setError(null);
-                  }}
-                  className="text-xs text-zinc-400 hover:text-zinc-200 transition"
-                >
-                  Don't have an account? Create one
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('register');
+                      setError(null);
+                    }}
+                    className="text-xs text-zinc-400 hover:text-zinc-200 transition"
+                  >
+                    Don't have an account? Create one
+                  </button>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('forgot');
+                        setForgotSent(false);
+                        setError(null);
+                      }}
+                      className="text-xs text-zinc-500 hover:text-zinc-300 transition"
+                    >
+                      Forgot your password?
+                    </button>
+                  </div>
+                </>
               ) : (
                 <button
                   type="button"

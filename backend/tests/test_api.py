@@ -108,8 +108,9 @@ async def test_ticket_creation_pure_human_and_isolation():
 
         # Check messages: ONLY customer message, ZERO AI bot messages
         msgs = (await client.get(f"/api/tickets/{ticket_id}/messages", headers=c1_h)).json()
-        assert len(msgs) == 1
-        assert msgs[0]["sender_role"] == "customer"
+        assert msgs["total"] == 1
+        assert len(msgs["items"]) == 1
+        assert msgs["items"][0]["sender_role"] == "customer"
 
         # C2 tries to read C1's ticket -> MUST BE 403 or 404 (IDOR safe)!
         hack_res = await client.get(f"/api/tickets/{ticket_id}", headers=c2_h)

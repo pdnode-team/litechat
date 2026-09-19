@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from litestar import Controller, get, patch, Request
 from litestar.exceptions import (
     NotAuthorizedException,
@@ -6,11 +6,13 @@ from litestar.exceptions import (
     NotFoundException,
     ValidationException,
 )
+from litestar.params import PathParameter, QueryParameter
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func, or_
 from app.db.session import async_session_factory
 from app.models.user import User
 from app.schemas.auth import UserResponse
+from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
 
 class UpdateRoleRequest(BaseModel):
@@ -23,7 +25,14 @@ class UserController(Controller):
     path = "/api/users"
 
     @get("/")
-    async def list_users(self, request: Request, role: Optional[str] = None) -> List[UserResponse]:
+    async def list_users(
+        self,
+        request: Request,
+        role: Annotated[Optional[str], QueryParameter()] = None,
+        search: Annotated[Optional[str], QueryParameter()] = None,
+        limit: LimitParam = DEFAULT_PAGE_SIZE,
+        offset: OffsetParam = 0,
+    ) -> Page[UserResponse]:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -31,15 +40,58 @@ class UserController(Controller):
             raise PermissionDeniedException("Forbidden: Administrator privileges required.")
 
         async with async_session_factory() as session:
-            stmt = select(User).order_by(desc(User.created_at))
+            filters = []
             if role:
-                stmt = stmt.where(User.role == role)
-            res = await session.execute(stmt)
-            users = res.scalars().all()
+                filters.append(User.role == role)
+            if search:
+                term = f"%{search.strip()}%"
+                filters.append(
+                    or_(
+                        User.email.ilike(term),
+                        User.username.ilike(term),
+                        User.full_name.ilike(term),
+                    )
+                )
+
+            total = (
+                await session.execute(select(func.count()).select_from(User).where(*filters))
+            ).scalar_one()
+
+            stmt = (
+                select(User)
+                .where(*filters)
+                .order_by(desc(User.created_at), desc(User.id))
+                .limit(limit)
+                .offset(offset)
+            )
+            users = (await session.execute(stmt)).scalars().all()
+            items = [UserResponse.model_validate(u) for u in users]
+            return Page[UserResponse](items=items, total=total, limit=limit, offset=offset)
+
+    @get("/assignable")
+    async def list_assignable_staff(self, request: Request) -> List[UserResponse]:
+        """Active staff an agent can hand a ticket to.
+
+        Kept separate from the administrator-only user list so agents can use the
+        reassignment picker without seeing customer accounts.
+        """
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise NotAuthorizedException("Authentication required.")
+        if current_user.role not in ("agent", "admin"):
+            raise PermissionDeniedException("Forbidden: Only support staff can view assignable staff.")
+
+        async with async_session_factory() as session:
+            stmt = (
+                select(User)
+                .where(User.role.in_(["agent", "admin"]), User.is_active.is_(True))
+                .order_by(User.full_name.asc())
+            )
+            users = (await session.execute(stmt)).scalars().all()
             return [UserResponse.model_validate(u) for u in users]
 
     @patch("/{user_id:int}/role")
-    async def update_user_role(self, request: Request, user_id: int, data: UpdateRoleRequest) -> UserResponse:
+    async def update_user_role(self, request: Request, user_id: Annotated[int, PathParameter()], data: UpdateRoleRequest) -> UserResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -64,7 +116,7 @@ class UserController(Controller):
             return UserResponse.model_validate(user)
 
     @patch("/{user_id:int}/status")
-    async def update_user_status(self, request: Request, user_id: int, data: UpdateStatusRequest) -> UserResponse:
+    async def update_user_status(self, request: Request, user_id: Annotated[int, PathParameter()], data: UpdateStatusRequest) -> UserResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")

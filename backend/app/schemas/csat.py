@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 
 class CSATCreate(BaseModel):
     score: int = Field(ge=1, le=5)
@@ -14,5 +14,4 @@ class CSATResponse(BaseModel):
     comment: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

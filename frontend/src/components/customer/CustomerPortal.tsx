@@ -22,12 +22,24 @@ import {
   Bot,
 } from 'lucide-react';
 import { formatUtc } from '../../utils/datetime';
+import { apiErrorMessage } from '../../utils/errors';
+import { useToast } from '../common/Toast';
+
+/** Rows fetched per "load more" step. */
+const PAGE_SIZE = 25;
+/** Messages fetched initially and per "load earlier" step. */
+const MESSAGE_PAGE_SIZE = 100;
 
 export const CustomerPortal: React.FC = () => {
   const { user } = useAuth();
+  const { showSuccess, showError } = useToast();
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketsTotal, setTicketsTotal] = useState(0);
+  const [loadingMoreTickets, setLoadingMoreTickets] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesTotal, setMessagesTotal] = useState(0);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [loadingTickets, setLoadingTickets] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,15 +61,25 @@ export const CustomerPortal: React.FC = () => {
     selectedTicketRef.current = selectedTicket;
   }, [selectedTicket]);
 
+  // Lets the stable callbacks below see how much is already loaded.
+  const loadedTicketsRef = useRef(0);
+  useEffect(() => {
+    loadedTicketsRef.current = tickets.length;
+  }, [tickets]);
+
   const fetchTickets = useCallback(async () => {
     try {
-      const list = await ticketsApi.list();
-      setTickets(list);
+      // Refetch everything currently on screen (plus a page) so new tickets
+      // appear without discarding the pages the user already loaded.
+      const limit = Math.max(PAGE_SIZE, loadedTicketsRef.current);
+      const page = await ticketsApi.list({ limit, offset: 0 });
+      setTickets(page.items);
+      setTicketsTotal(page.total);
       const current = selectedTicketRef.current;
-      if (!current && list.length > 0) {
-        setSelectedTicket(list[0]);
+      if (!current && page.items.length > 0) {
+        setSelectedTicket(page.items[0]);
       } else if (current) {
-        const updated = list.find((t) => t.id === current.id);
+        const updated = page.items.find((t) => t.id === current.id);
         if (updated) setSelectedTicket(updated);
       }
     } catch (err) {
@@ -66,6 +88,22 @@ export const CustomerPortal: React.FC = () => {
       setLoadingTickets(false);
     }
   }, []);
+
+  const loadMoreTickets = async () => {
+    setLoadingMoreTickets(true);
+    try {
+      const page = await ticketsApi.list({ limit: PAGE_SIZE, offset: tickets.length });
+      setTickets((prev) => {
+        const seen = new Set(prev.map((t) => t.id));
+        return [...prev, ...page.items.filter((t) => !seen.has(t.id))];
+      });
+      setTicketsTotal(page.total);
+    } catch (err) {
+      console.error('Failed to load more tickets', err);
+    } finally {
+      setLoadingMoreTickets(false);
+    }
+  };
 
   useEffect(() => {
     fetchTickets();
@@ -80,10 +118,11 @@ export const CustomerPortal: React.FC = () => {
     setLoadingMessages(true);
     setTypingUsers([]);
     messagesApi
-      .list(currentId)
-      .then((msgs) => {
+      .list(currentId, { limit: MESSAGE_PAGE_SIZE, offset: 0 })
+      .then((page) => {
         if (selectedTicketRef.current?.id === currentId) {
-          setMessages(msgs);
+          setMessages(page.items);
+          setMessagesTotal(page.total);
           setLoadingMessages(false);
           setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         }
@@ -150,12 +189,36 @@ export const CustomerPortal: React.FC = () => {
       });
       setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } catch (err) {
-      console.error('Failed to send message', err);
+      showError(apiErrorMessage(err, 'Failed to send your message.'));
     }
   };
 
   const handleTyping = (isTyping: boolean) => {
     wsClientRef.current?.sendTyping(isTyping);
+  };
+
+  /** Fetch the next older page of the conversation and prepend it. */
+  const loadOlderMessages = async () => {
+    if (!selectedTicket) return;
+    const currentId = selectedTicket.id;
+    setLoadingOlderMessages(true);
+    try {
+      const page = await messagesApi.list(currentId, {
+        limit: MESSAGE_PAGE_SIZE,
+        offset: messages.length,
+      });
+      if (selectedTicketRef.current?.id !== currentId) return;
+      setMessages((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        // The page arrives in chronological order, so it can be prepended as-is.
+        return [...page.items.filter((m) => !seen.has(m.id)), ...prev];
+      });
+      setMessagesTotal(page.total);
+    } catch (err) {
+      console.error('Failed to load earlier messages', err);
+    } finally {
+      setLoadingOlderMessages(false);
+    }
   };
 
   const handleToggleClose = async () => {
@@ -169,8 +232,9 @@ export const CustomerPortal: React.FC = () => {
       if (newStatus === 'resolved') {
         setIsCsatOpen(true);
       }
+      showSuccess(newStatus === 'open' ? 'Ticket reopened' : 'Ticket marked resolved');
     } catch (err) {
-      console.error('Failed to update status', err);
+      showError(apiErrorMessage(err, 'Failed to update the ticket status.'));
     }
   };
 
@@ -284,11 +348,19 @@ export const CustomerPortal: React.FC = () => {
                 ) : (
                   filteredTickets.map((ticket) => {
                     const isSelected = selectedTicket?.id === ticket.id;
-                    return (
-                      <div
+                    return (                      <div
                         key={ticket.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-current={isSelected}
                         onClick={() => setSelectedTicket(ticket)}
-                        className={`p-3 cursor-pointer transition select-none ${
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelectedTicket(ticket);
+                          }
+                        }}
+                        className={`p-3 cursor-pointer transition select-none focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-zinc-500 ${
                           isSelected
                             ? 'bg-zinc-800/70 border-l-2 border-zinc-200'
                             : 'hover:bg-zinc-900/60'
@@ -310,6 +382,21 @@ export const CustomerPortal: React.FC = () => {
                       </div>
                     );
                   })
+                )}
+
+                {!loadingTickets && tickets.length < ticketsTotal && (
+                  <div className="p-3 border-t border-zinc-800/60">
+                    <button
+                      type="button"
+                      onClick={loadMoreTickets}
+                      disabled={loadingMoreTickets}
+                      className="w-full py-1.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 rounded-md transition disabled:opacity-50"
+                    >
+                      {loadingMoreTickets
+                        ? 'Loading...'
+                        : `Load more (${tickets.length} of ${ticketsTotal})`}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -375,6 +462,21 @@ export const CustomerPortal: React.FC = () => {
 
                 {/* Conversation Stream */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-1">
+                  {!loadingMessages && messages.length < messagesTotal && (
+                    <div className="pb-3 text-center">
+                      <button
+                        type="button"
+                        onClick={loadOlderMessages}
+                        disabled={loadingOlderMessages}
+                        className="px-3 py-1.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 border border-zinc-800 rounded-md transition disabled:opacity-50"
+                      >
+                        {loadingOlderMessages
+                          ? 'Loading...'
+                          : `Load earlier messages (${messagesTotal - messages.length} more)`}
+                      </button>
+                    </div>
+                  )}
+
                   {loadingMessages ? (
                     <div className="text-center py-12 text-xs font-mono text-zinc-500">Loading conversation...</div>
                   ) : messages.length === 0 ? (

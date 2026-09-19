@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Star, X, CheckCircle } from 'lucide-react';
 import { csatApi } from '../../api/client';
+import { Modal } from '../common/Modal';
 
 interface Props {
   ticketId: number;
@@ -25,8 +26,6 @@ export const CsatDialog: React.FC<Props> = ({ ticketId, ticketTitle, isOpen, onC
     }
   }, [isOpen, ticketId]);
 
-  if (!isOpen) return null;
-
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
@@ -44,11 +43,17 @@ export const CsatDialog: React.FC<Props> = ({ ticketId, ticketTitle, isOpen, onC
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl max-w-md w-full p-5 relative animate-in fade-in zoom-in-95 duration-150">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy="csat-dialog-title"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl max-w-md w-full p-5 relative animate-in fade-in zoom-in-95 duration-150"
+    >
         <button
           type="button"
           onClick={onClose}
+          aria-label="Close dialog"
           className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-200 p-1 rounded-md hover:bg-zinc-800 transition"
         >
           <X className="w-4 h-4" />
@@ -59,7 +64,7 @@ export const CsatDialog: React.FC<Props> = ({ ticketId, ticketTitle, isOpen, onC
             <div className="w-10 h-10 bg-emerald-950/80 border border-emerald-800 text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-3">
               <CheckCircle className="w-5 h-5" />
             </div>
-            <h3 className="text-sm font-semibold text-zinc-100">Thank You For Your Feedback</h3>
+            <h3 id="csat-dialog-title" className="text-sm font-semibold text-zinc-100">Thank You For Your Feedback</h3>
             <p className="text-xs text-zinc-400 mt-1">Your rating has been recorded.</p>
           </div>
         ) : (
@@ -68,7 +73,7 @@ export const CsatDialog: React.FC<Props> = ({ ticketId, ticketTitle, isOpen, onC
               <div className="w-9 h-9 bg-zinc-800 text-zinc-300 rounded-lg border border-zinc-700/60 flex items-center justify-center mx-auto mb-2.5">
                 <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
               </div>
-              <h3 className="text-sm font-semibold text-zinc-100">Resolution Feedback</h3>
+              <h3 id="csat-dialog-title" className="text-sm font-semibold text-zinc-100">Resolution Feedback</h3>
               <p className="text-xs text-zinc-400 mt-0.5 truncate max-w-xs mx-auto">
                 Ticket: <span className="font-mono text-zinc-300">{ticketTitle}</span>
               </p>
@@ -80,6 +85,8 @@ export const CsatDialog: React.FC<Props> = ({ ticketId, ticketTitle, isOpen, onC
                 <button
                   key={star}
                   type="button"
+                  aria-label={`Rate ${star} out of 5 stars`}
+                  aria-pressed={rating === star}
                   onMouseEnter={() => setHoverRating(star)}
                   onMouseLeave={() => setHoverRating(0)}
                   onClick={() => setRating(star)}
@@ -130,7 +137,6 @@ export const CsatDialog: React.FC<Props> = ({ ticketId, ticketTitle, isOpen, onC
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   analyticsApi,
@@ -18,6 +18,8 @@ import {
   FaqItem,
 } from '../../types';
 import { UserAvatar } from '../common/UserAvatar';
+import { Modal } from '../common/Modal';
+import { apiErrorMessage } from '../../utils/errors';
 import {
   Star,
   AlertTriangle,
@@ -35,6 +37,9 @@ import {
 } from 'lucide-react';
 import { formatUtc } from '../../utils/datetime';
 
+/** Rows fetched per user-table page. */
+const PAGE_SIZE = 25;
+
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     'overview' | 'users' | 'canned' | 'apps' | 'types' | 'faq'
@@ -44,8 +49,7 @@ export const AdminDashboard: React.FC = () => {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [cannedList, setCannedList] = useState<CannedResponse[]>([]);
   const [usersList, setUsersList] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [userSearch, setUserSearch] = useState('');
+  const [loading, setLoading] = useState(true);  const [userSearch, setUserSearch] = useState('');
   const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
@@ -122,17 +126,22 @@ export const AdminDashboard: React.FC = () => {
 
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [loadingMoreUsers, setLoadingMoreUsers] = useState(false);
+
   const fetchData = async () => {
     setLoading(true);
     setFetchError(null);
     try {
+      // Catalogues are small, so load them whole; the user table is paginated
+      // separately because it grows with the customer base.
       const [sumRes, cannedRes, usersRes, appsRes, typesRes, faqsRes] = await Promise.allSettled([
         analyticsApi.getSummary(),
-        cannedApi.list(),
-        usersApi.list(),
-        appsApi.list(),
-        ticketTypesApi.list(),
-        faqApi.list(),
+        cannedApi.listAll(),
+        usersApi.list({ limit: PAGE_SIZE, offset: 0 }),
+        appsApi.listAll(),
+        ticketTypesApi.listAll(),
+        faqApi.listAll(),
       ]);
 
       const failedModules: string[] = [];
@@ -142,8 +151,10 @@ export const AdminDashboard: React.FC = () => {
       if (cannedRes.status === 'fulfilled') setCannedList(cannedRes.value);
       else failedModules.push('Macros');
 
-      if (usersRes.status === 'fulfilled') setUsersList(usersRes.value);
-      else failedModules.push('Users');
+      if (usersRes.status === 'fulfilled') {
+        setUsersList(usersRes.value.items);
+        setUsersTotal(usersRes.value.total);
+      } else failedModules.push('Users');
 
       if (appsRes.status === 'fulfilled') setAppsList(appsRes.value);
       else failedModules.push('Apps');
@@ -165,6 +176,40 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  /** Server-side user search: the table only holds one page at a time. */
+  const searchUsers = useCallback(async (term: string) => {
+    setLoadingMoreUsers(true);
+    try {
+      const page = await usersApi.list({ search: term.trim() || undefined, limit: PAGE_SIZE, offset: 0 });
+      setUsersList(page.items);
+      setUsersTotal(page.total);
+    } catch (err) {
+      console.error('Failed to search users', err);
+    } finally {
+      setLoadingMoreUsers(false);
+    }
+  }, []);
+
+  const loadMoreUsers = async () => {
+    setLoadingMoreUsers(true);
+    try {
+      const page = await usersApi.list({
+        search: userSearch.trim() || undefined,
+        limit: PAGE_SIZE,
+        offset: usersList.length,
+      });
+      setUsersList((prev) => {
+        const seen = new Set(prev.map((u) => u.id));
+        return [...prev, ...page.items.filter((u) => !seen.has(u.id))];
+      });
+      setUsersTotal(page.total);
+    } catch (err) {
+      console.error('Failed to load more users', err);
+    } finally {
+      setLoadingMoreUsers(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -182,8 +227,8 @@ export const AdminDashboard: React.FC = () => {
       const updated = await usersApi.updateRole(targetUser.id, newRole);
       setUsersList((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
       triggerToast(`Updated role for ${targetUser.full_name} to ${newRole.toUpperCase()}`);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to update user role');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to update user role'));
     } finally {
       setUpdatingUserId(null);
     }
@@ -196,8 +241,8 @@ export const AdminDashboard: React.FC = () => {
       const updated = await usersApi.updateStatus(targetUser.id, !targetUser.is_active);
       setUsersList((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
       triggerToast(`User ${targetUser.full_name} is now ${updated.is_active ? 'ACTIVE' : 'DEACTIVATED'}`);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to update user status');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to update user status'));
     } finally {
       setUpdatingUserId(null);
     }
@@ -252,8 +297,8 @@ export const AdminDashboard: React.FC = () => {
       setAppCode('');
       setAppBaseUrl('');
       triggerToast(`Application "${created.name}" registered`);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to register app');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to register app'));
     }
   };
 
@@ -317,8 +362,8 @@ export const AdminDashboard: React.FC = () => {
       setTypeDescription('');
       setTypeFields([]);
       triggerToast(`Ticket type "${created.name}" created`);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to create ticket type');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to create ticket type'));
     }
   };
 
@@ -357,8 +402,8 @@ export const AdminDashboard: React.FC = () => {
       setFaqKeywords('');
       setFaqQuickRepliesStr('');
       triggerToast('FAQ entry created');
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to create FAQ');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to create FAQ'));
     }
   };
 
@@ -395,8 +440,8 @@ export const AdminDashboard: React.FC = () => {
       setCannedList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
       setEditingCanned(null);
       triggerToast(`Macro "${updated.shortcut}" updated`);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to update macro');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to update macro'));
     }
   };
 
@@ -424,8 +469,8 @@ export const AdminDashboard: React.FC = () => {
       setAppsList((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
       setEditingApp(null);
       triggerToast(`Application "${updated.name}" updated`);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to update app');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to update app'));
     }
   };
 
@@ -489,8 +534,8 @@ export const AdminDashboard: React.FC = () => {
       setTypesList((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
       setEditingType(null);
       triggerToast(`Ticket type "${updated.name}" updated`);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to update ticket type');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to update ticket type'));
     }
   };
 
@@ -525,17 +570,24 @@ export const AdminDashboard: React.FC = () => {
       setFaqList((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
       setEditingFaq(null);
       triggerToast('FAQ article updated');
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to update FAQ');
+    } catch (err) {
+      alert(apiErrorMessage(err, 'Failed to update FAQ'));
     }
   };
 
-  const filteredUsers = usersList.filter(
-    (u) =>
-      u.full_name.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.role.toLowerCase().includes(userSearch.toLowerCase())
-  );
+  // Debounced server-side user search: the table only holds one page.
+  const userSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (userSearchTimer.current) clearTimeout(userSearchTimer.current);
+    // Skip the initial mount, the first page is already loaded.
+    userSearchTimer.current = setTimeout(() => {
+      void searchUsers(userSearch);
+    }, 300);
+    return () => {
+      if (userSearchTimer.current) clearTimeout(userSearchTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userSearch]);
 
   if (loading && !summary) {
     return (
@@ -635,7 +687,7 @@ export const AdminDashboard: React.FC = () => {
             }`}
           >
             <Shield className="w-3 h-3" />
-            Users ({usersList.length})
+            Users ({usersTotal})
           </button>
           <button
             type="button"
@@ -726,7 +778,7 @@ export const AdminDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60 font-medium">
-                {filteredUsers.map((u) => (
+                {usersList.map((u) => (
                   <tr key={u.id} className="hover:bg-zinc-800/30 transition">
                     <td className="py-2.5 px-3.5 text-zinc-200 flex items-center gap-2.5">
                       <UserAvatar name={u.full_name} size="sm" />
@@ -791,6 +843,21 @@ export const AdminDashboard: React.FC = () => {
                 ))}
               </tbody>
             </table>
+
+            {usersList.length < usersTotal && (
+              <div className="p-3 border-t border-zinc-800/60 text-center">
+                <button
+                  type="button"
+                  onClick={loadMoreUsers}
+                  disabled={loadingMoreUsers}
+                  className="px-3 py-1.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 border border-zinc-800 rounded-md transition disabled:opacity-50"
+                >
+                  {loadingMoreUsers
+                    ? 'Loading...'
+                    : `Load more (${usersList.length} of ${usersTotal})`}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -879,6 +946,7 @@ export const AdminDashboard: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => openEditApp(app)}
+                            aria-label={`Edit ${app.name}`}
                             className="p-1 text-zinc-500 hover:text-zinc-200 transition"
                             title="Edit App"
                           >
@@ -887,6 +955,7 @@ export const AdminDashboard: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleDeleteApp(app.id)}
+                            aria-label={`Delete ${app.name}`}
                             className="p-1 text-zinc-500 hover:text-rose-400 transition"
                             title="Delete App"
                           >
@@ -953,6 +1022,7 @@ export const AdminDashboard: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => openEditType(tt)}
+                        aria-label={`Edit ${tt.name}`}
                         className="text-zinc-500 hover:text-zinc-200 p-1 rounded transition"
                         title="Edit Ticket Type"
                       >
@@ -961,6 +1031,7 @@ export const AdminDashboard: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleDeleteTicketType(tt.id)}
+                        aria-label={`Delete ${tt.name}`}
                         className="text-zinc-500 hover:text-rose-400 p-1 rounded transition"
                         title="Delete Ticket Type"
                       >
@@ -1051,6 +1122,7 @@ export const AdminDashboard: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => openEditFaq(item)}
+                        aria-label={`Edit FAQ article: ${item.question}`}
                         className="text-zinc-500 hover:text-zinc-200 p-1 rounded transition"
                         title="Edit FAQ Article"
                       >
@@ -1059,6 +1131,7 @@ export const AdminDashboard: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleDeleteFaq(item.id)}
+                        aria-label={`Delete FAQ article: ${item.question}`}
                         className="text-zinc-500 hover:text-rose-400 p-1 rounded transition"
                         title="Delete FAQ Article"
                       >
@@ -1233,6 +1306,7 @@ export const AdminDashboard: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => openEditCanned(macro)}
+                            aria-label={`Edit macro ${macro.shortcut}`}
                             className="p-1 text-zinc-500 hover:text-zinc-200 transition"
                             title="Edit Macro"
                           >
@@ -1241,6 +1315,7 @@ export const AdminDashboard: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleDeleteCanned(macro.id)}
+                            aria-label={`Delete macro ${macro.shortcut}`}
                             className="p-1 text-zinc-500 hover:text-rose-400 transition"
                             title="Delete Macro"
                           >
@@ -1258,15 +1333,19 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {/* MODAL: Register App */}
-      {isAddAppOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4">
+      <Modal
+        isOpen={isAddAppOpen}
+        onClose={() => setIsAddAppOpen(false)}
+        labelledBy="admin-add-app-title"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+        panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4"
+      >
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+              <h3 id="admin-add-app-title" className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
                 <Globe className="w-4 h-4 text-zinc-400" />
                 Register New Application / Site
               </h3>
-              <button onClick={() => setIsAddAppOpen(false)} className="text-zinc-400 hover:text-zinc-200">
+              <button type="button" onClick={() => setIsAddAppOpen(false)} aria-label="Close dialog" className="text-zinc-400 hover:text-zinc-200">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1329,20 +1408,22 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* MODAL: New Ticket Type & Custom Fields Builder */}
-      {isAddTypeOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-xl w-full shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col">
+      <Modal
+        isOpen={isAddTypeOpen}
+        onClose={() => setIsAddTypeOpen(false)}
+        labelledBy="admin-add-type-title"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+        panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-xl w-full shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col"
+      >
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+              <h3 id="admin-add-type-title" className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
                 <Sliders className="w-4 h-4 text-zinc-400" />
                 Configure Ticket Type & Dynamic Fields
               </h3>
-              <button onClick={() => setIsAddTypeOpen(false)} className="text-zinc-400 hover:text-zinc-200">
+              <button type="button" onClick={() => setIsAddTypeOpen(false)} aria-label="Close dialog" className="text-zinc-400 hover:text-zinc-200">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1411,7 +1492,7 @@ export const AdminDashboard: React.FC = () => {
                     <label className="block text-[10px] font-mono uppercase text-zinc-500 mb-1">Field Type</label>
                     <select
                       value={fieldType}
-                      onChange={(e) => setFieldType(e.target.value as any)}
+                      onChange={(e) => setFieldType(e.target.value as CustomFieldDefinition['type'])}
                       className="w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 focus:outline-none font-mono"
                     >
                       <option value="text">Text (Single line)</option>
@@ -1482,6 +1563,7 @@ export const AdminDashboard: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleRemoveFieldFromType(fIdx)}
+                          aria-label={`Remove field ${f.label}`}
                           className="text-zinc-500 hover:text-rose-400 p-1"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -1508,20 +1590,22 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* MODAL: New FAQ Article */}
-      {isAddFaqOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-lg w-full shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col">
+      <Modal
+        isOpen={isAddFaqOpen}
+        onClose={() => setIsAddFaqOpen(false)}
+        labelledBy="admin-add-faq-title"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+        panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-lg w-full shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col"
+      >
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+              <h3 id="admin-add-faq-title" className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
                 <HelpCircle className="w-4 h-4 text-zinc-400" />
                 Add FAQ Diagnostic Solution
               </h3>
-              <button onClick={() => setIsAddFaqOpen(false)} className="text-zinc-400 hover:text-zinc-200">
+              <button type="button" onClick={() => setIsAddFaqOpen(false)} aria-label="Close dialog" className="text-zinc-400 hover:text-zinc-200">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1613,17 +1697,19 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* MODAL: New Macro */}
-      {isAddCannedOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4">
+      <Modal
+        isOpen={isAddCannedOpen}
+        onClose={() => setIsAddCannedOpen(false)}
+        labelledBy="admin-add-canned-title"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+        panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4"
+      >
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100">Create Staff Response Macro</h3>
-              <button onClick={() => setIsAddCannedOpen(false)} className="text-zinc-400 hover:text-zinc-200">
+              <h3 id="admin-add-canned-title" className="text-sm font-semibold text-zinc-100">Create Staff Response Macro</h3>
+              <button type="button" onClick={() => setIsAddCannedOpen(false)} aria-label="Close dialog" className="text-zinc-400 hover:text-zinc-200">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1695,20 +1781,22 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* MODAL: Edit App */}
-      {editingApp && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4">
+      <Modal
+        isOpen={editingApp !== null}
+        onClose={() => setEditingApp(null)}
+        labelledBy="admin-edit-app-title"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+        panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4"
+      >
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+              <h3 id="admin-edit-app-title" className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
                 <Globe className="w-4 h-4 text-zinc-400" />
                 Edit Application / Site
               </h3>
-              <button onClick={() => setEditingApp(null)} className="text-zinc-400 hover:text-zinc-200">
+              <button type="button" onClick={() => setEditingApp(null)} aria-label="Close dialog" className="text-zinc-400 hover:text-zinc-200">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1783,20 +1871,22 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* MODAL: Edit Ticket Type & Custom Fields */}
-      {editingType && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-xl w-full shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col">
+      <Modal
+        isOpen={editingType !== null}
+        onClose={() => setEditingType(null)}
+        labelledBy="admin-edit-type-title"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+        panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-xl w-full shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col"
+      >
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+              <h3 id="admin-edit-type-title" className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
                 <Sliders className="w-4 h-4 text-zinc-400" />
                 Edit Ticket Type & Schema Fields
               </h3>
-              <button onClick={() => setEditingType(null)} className="text-zinc-400 hover:text-zinc-200">
+              <button type="button" onClick={() => setEditingType(null)} aria-label="Close dialog" className="text-zinc-400 hover:text-zinc-200">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1877,7 +1967,7 @@ export const AdminDashboard: React.FC = () => {
                     <label className="block text-[10px] font-mono uppercase text-zinc-500 mb-1">Field Type</label>
                     <select
                       value={editFieldType}
-                      onChange={(e) => setEditFieldType(e.target.value as any)}
+                      onChange={(e) => setEditFieldType(e.target.value as CustomFieldDefinition['type'])}
                       className="w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 focus:outline-none font-mono"
                     >
                       <option value="text">Text (Single line)</option>
@@ -1948,6 +2038,7 @@ export const AdminDashboard: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleRemoveEditFieldFromType(fIdx)}
+                          aria-label={`Remove field ${f.label}`}
                           className="text-zinc-500 hover:text-rose-400 p-1"
                           title="Remove Field"
                         >
@@ -1975,20 +2066,22 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* MODAL: Edit FAQ Article */}
-      {editingFaq && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-lg w-full shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col">
+      <Modal
+        isOpen={editingFaq !== null}
+        onClose={() => setEditingFaq(null)}
+        labelledBy="admin-edit-faq-title"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+        panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-lg w-full shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col"
+      >
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+              <h3 id="admin-edit-faq-title" className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
                 <HelpCircle className="w-4 h-4 text-zinc-400" />
                 Edit FAQ Diagnostic Solution
               </h3>
-              <button onClick={() => setEditingFaq(null)} className="text-zinc-400 hover:text-zinc-200">
+              <button type="button" onClick={() => setEditingFaq(null)} aria-label="Close dialog" className="text-zinc-400 hover:text-zinc-200">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -2092,17 +2185,19 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* MODAL: Edit Macro */}
-      {editingCanned && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4">
+      <Modal
+        isOpen={editingCanned !== null}
+        onClose={() => setEditingCanned(null)}
+        labelledBy="admin-edit-canned-title"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+        panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4"
+      >
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100">Edit Staff Response Macro</h3>
-              <button onClick={() => setEditingCanned(null)} className="text-zinc-400 hover:text-zinc-200">
+              <h3 id="admin-edit-canned-title" className="text-sm font-semibold text-zinc-100">Edit Staff Response Macro</h3>
+              <button type="button" onClick={() => setEditingCanned(null)} aria-label="Close dialog" className="text-zinc-400 hover:text-zinc-200">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -2174,9 +2269,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   );
 };

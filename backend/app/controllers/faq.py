@@ -1,8 +1,10 @@
 import json
-from typing import List, Optional
+import re
+from typing import Annotated, List, Optional
 from litestar import Controller, get, post, put, delete, Request
 from litestar.exceptions import NotAuthorizedException, PermissionDeniedException, NotFoundException
-from sqlalchemy import select, or_
+from litestar.params import PathParameter, QueryParameter
+from sqlalchemy import select, or_, func
 from app.db.session import async_session_factory
 from app.models.faq_item import FaqItem
 from app.schemas.faq import (
@@ -12,7 +14,26 @@ from app.schemas.faq import (
     FaqQueryRequest,
     FaqQueryResponse,
 )
+from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
+
+# Words that carry no signal and would otherwise match almost any article.
+STOPWORDS = {
+    "the", "and", "for", "are", "but", "not", "you", "your", "with", "this", "that",
+    "how", "what", "why", "when", "where", "who", "can", "could", "would", "should",
+    "does", "did", "has", "have", "was", "were", "will", "its", "it's", "from", "about",
+    "into", "out", "get", "got", "any", "all", "some", "please", "help", "issue",
+    "problem", "there", "here", "they", "them", "his", "her", "our", "been", "being",
+}
+
+
+def _tokenize(text: str) -> List[str]:
+    """Split into lowercase word tokens, dropping noise words and 1-2 char fragments."""
+    return [
+        token
+        for token in re.findall(r"[a-z0-9_]+", text.lower())
+        if len(token) > 2 and token not in STOPWORDS
+    ]
 
 def faq_to_response(item: FaqItem) -> FaqItemResponse:
     replies = []
@@ -41,32 +62,47 @@ class FaqController(Controller):
     async def list_faq(
         self,
         request: Request,
-        category: Optional[str] = None,
-        search: Optional[str] = None,
-        active_only: Optional[bool] = None,
-    ) -> List[FaqItemResponse]:
+        category: Annotated[Optional[str], QueryParameter()] = None,
+        search: Annotated[Optional[str], QueryParameter()] = None,
+        active_only: Annotated[Optional[bool], QueryParameter()] = None,
+        limit: LimitParam = DEFAULT_PAGE_SIZE,
+        offset: OffsetParam = 0,
+    ) -> Page[FaqItemResponse]:
         async with async_session_factory() as session:
-            stmt = select(FaqItem).order_by(FaqItem.sort_order.asc(), FaqItem.id.asc())
+            filters = []
             if active_only:
-                stmt = stmt.where(FaqItem.is_active.is_(True))
+                filters.append(FaqItem.is_active.is_(True))
             if category:
-                stmt = stmt.where(FaqItem.category == category)
+                filters.append(FaqItem.category == category)
             if search:
                 term = f"%{search.strip().lower()}%"
-                stmt = stmt.where(
+                filters.append(
                     or_(
                         FaqItem.question.ilike(term),
                         FaqItem.answer.ilike(term),
                         FaqItem.keywords.ilike(term),
                     )
                 )
+
+            total = (
+                await session.execute(select(func.count()).select_from(FaqItem).where(*filters))
+            ).scalar_one()
+
+            stmt = (
+                select(FaqItem)
+                .where(*filters)
+                .order_by(FaqItem.sort_order.asc(), FaqItem.id.asc())
+                .limit(limit)
+                .offset(offset)
+            )
             result = await session.execute(stmt)
-            items = result.scalars().all()
-            return [faq_to_response(i) for i in items]
+            items = [faq_to_response(i) for i in result.scalars().all()]
+            return Page[FaqItemResponse](items=items, total=total, limit=limit, offset=offset)
 
     @post("/query")
     async def query_faq_engine(self, data: FaqQueryRequest) -> FaqQueryResponse:
         query_str = data.query.strip().lower()
+        query_words = _tokenize(query_str)
         async with async_session_factory() as session:
             stmt = select(FaqItem).where(FaqItem.is_active.is_(True))
             if data.category:
@@ -74,36 +110,45 @@ class FaqController(Controller):
             result = await session.execute(stmt)
             all_faqs = result.scalars().all()
 
-            # Rank matches by score
+            # Rank by token overlap. Matching is word-based and requires a minimum
+            # score, so an unrelated question returns nothing instead of the
+            # nearest article (substring scoring used to match "can" inside
+            # "cancel" and even a single letter inside any answer body).
             matches = []
             for item in all_faqs:
+                q_tokens = set(_tokenize(item.question))
+                kw_tokens = set(_tokenize(item.keywords or ""))
+                ans_tokens = set(_tokenize(item.answer))
+                haystack = q_tokens | kw_tokens | ans_tokens
+
                 score = 0
-                q_lower = item.question.lower()
-                ans_lower = item.answer.lower()
-                kw_lower = (item.keywords or "").lower()
-
-                # Exact or phrase match
-                if query_str in q_lower:
+                if query_str and query_str in item.question.lower():
                     score += 10
-                if query_str in kw_lower:
+                if query_str and query_str in (item.keywords or "").lower():
                     score += 8
-                if query_str in ans_lower:
-                    score += 3
 
-                # Word-level matching
-                query_words = [w for w in query_str.split() if len(w) > 1]
-                for w in query_words:
-                    if w in q_lower:
-                        score += 3
-                    if w in kw_lower:
-                        score += 3
-                    if w in ans_lower:
+                for word in query_words:
+                    if word in q_tokens:
+                        score += 4
+                    if word in kw_tokens:
+                        score += 4
+                    if word in ans_tokens:
                         score += 1
+                    # Tolerate simple plurals/inflections without full stemming.
+                    if word.endswith("s") and word[:-1] in haystack:
+                        score += 2
 
-                if score > 0 or not query_str:
+                if score > 0:
                     matches.append((score, item))
 
-            matches.sort(key=lambda x: x[0], reverse=True)
+            matches.sort(key=lambda pair: (-pair[0], pair[1].sort_order, pair[1].id))
+
+            # An empty query (browsing) shows the recommended articles; a real
+            # query must clear MIN_RELEVANCE_SCORE to be considered a match.
+            MIN_RELEVANCE_SCORE = 3
+            if query_str:
+                matches = [pair for pair in matches if pair[0] >= MIN_RELEVANCE_SCORE]
+
             top_items = [faq_to_response(item) for score, item in matches[:5]]
 
             # Collect quick options from top matches
@@ -150,7 +195,7 @@ class FaqController(Controller):
             return faq_to_response(new_faq)
 
     @put("/{faq_id:int}")
-    async def update_faq(self, request: Request, faq_id: int, data: FaqItemUpdate) -> FaqItemResponse:
+    async def update_faq(self, request: Request, faq_id: Annotated[int, PathParameter()], data: FaqItemUpdate) -> FaqItemResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -182,7 +227,7 @@ class FaqController(Controller):
             return faq_to_response(item)
 
     @delete("/{faq_id:int}")
-    async def delete_faq(self, request: Request, faq_id: int) -> None:
+    async def delete_faq(self, request: Request, faq_id: Annotated[int, PathParameter()]) -> None:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")

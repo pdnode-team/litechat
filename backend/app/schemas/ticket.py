@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from app.schemas.auth import UserResponse
 from app.schemas.managed_app import ManagedAppResponse
 from app.schemas.ticket_type import TicketTypeResponse
@@ -24,6 +24,18 @@ class TicketAssignRequest(BaseModel):
 
 class TicketPriorityUpdateRequest(BaseModel):
     priority: Literal["low", "medium", "high", "urgent"]
+
+class TicketUpdateRequest(BaseModel):
+    """Partial edit of the ticket's descriptive fields.
+
+    Status/priority/assignment have dedicated endpoints with their own rules.
+    """
+
+    title: Optional[str] = Field(default=None, min_length=3, max_length=255)
+    description: Optional[str] = Field(default=None, min_length=5)
+    category: Optional[Literal["technical", "billing", "account", "general"]] = None
+    tags: Optional[str] = None
+    target_url: Optional[str] = None
 
 class TicketResponse(BaseModel):
     id: int
@@ -59,5 +71,4 @@ class TicketResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

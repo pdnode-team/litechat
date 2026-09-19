@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import Annotated, Optional
 from litestar import Controller, get, post, Request
 from litestar.exceptions import NotAuthorizedException, PermissionDeniedException, NotFoundException, ValidationException
+from litestar.params import PathParameter
 from sqlalchemy import select
 from app.db.session import async_session_factory
 from app.models.ticket import Ticket
@@ -12,7 +13,7 @@ class CSATController(Controller):
     path = "/api/tickets/{ticket_id:int}/csat"
 
     @get("/")
-    async def get_csat(self, request: Request, ticket_id: int) -> Optional[CSATResponse]:
+    async def get_csat(self, request: Request, ticket_id: Annotated[int, PathParameter()]) -> Optional[CSATResponse]:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required")
@@ -33,7 +34,7 @@ class CSATController(Controller):
             return CSATResponse.model_validate(rating)
 
     @post("/")
-    async def submit_csat(self, request: Request, ticket_id: int, data: CSATCreate) -> CSATResponse:
+    async def submit_csat(self, request: Request, ticket_id: Annotated[int, PathParameter()], data: CSATCreate) -> CSATResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required")

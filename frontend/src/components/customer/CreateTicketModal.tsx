@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, AlertCircle, Globe, Sliders } from 'lucide-react';
 import { ticketsApi, appsApi, ticketTypesApi } from '../../api/client';
 import { Ticket, ManagedApp, TicketType } from '../../types';
+import { Modal } from '../common/Modal';
+import { apiErrorMessage } from '../../utils/errors';
 
 interface Props {
   isOpen: boolean;
@@ -11,9 +13,19 @@ interface Props {
   initialDescription?: string;
 }
 
+/** Values a dynamic custom field can hold locally before being sent to the API. */
+type CustomFieldValue = string | number | boolean;
+
+/** Render a custom-field value back into a form control (which only takes text). */
+const textValue = (value: CustomFieldValue | undefined): string => {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  return value ? 'true' : '';
+};
+
 /** Build the initial custom-field values for a ticket type's schema. */
-const defaultValuesFor = (type: TicketType): Record<string, any> => {
-  const values: Record<string, any> = {};
+const defaultValuesFor = (type: TicketType): Record<string, CustomFieldValue> => {
+  const values: Record<string, CustomFieldValue> = {};
   type.fields_schema.forEach((field) => {
     if (field.type === 'switch') values[field.key] = false;
     else if (field.type === 'select' && field.options && field.options.length > 0) {
@@ -44,7 +56,7 @@ export const CreateTicketModal: React.FC<Props> = ({
   const [selectedAppId, setSelectedAppId] = useState<number | undefined>(undefined);
   const [targetUrl, setTargetUrl] = useState('');
   const [selectedTypeId, setSelectedTypeId] = useState<number | undefined>(undefined);
-  const [customFields, setCustomFields] = useState<Record<string, any>>({});
+  const [customFields, setCustomFields] = useState<Record<string, CustomFieldValue>>({});
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,8 +76,8 @@ export const CreateTicketModal: React.FC<Props> = ({
     setCustomFields({});
     setError(null);
 
-    // Load active apps and types
-    Promise.all([appsApi.list(true), ticketTypesApi.list(true)])
+    // Load active apps and types (small catalogues, so fetch them all)
+    Promise.all([appsApi.listAll(true), ticketTypesApi.listAll(true)])
       .then(([appList, typeList]) => {
         setApps(appList);
         setTicketTypes(typeList);
@@ -85,14 +97,12 @@ export const CreateTicketModal: React.FC<Props> = ({
     setCustomFields(chosenType ? defaultValuesFor(chosenType) : {});
   };
 
-  const handleCustomFieldChange = (key: string, value: any) => {
+  const handleCustomFieldChange = (key: string, value: CustomFieldValue) => {
     setCustomFields((prev) => ({
       ...prev,
       [key]: value,
     }));
   };
-
-  if (!isOpen) return null;
 
   const currentType = ticketTypes.find((t) => t.id === selectedTypeId);
 
@@ -132,27 +142,33 @@ export const CreateTicketModal: React.FC<Props> = ({
       });
       onTicketCreated(ticket);
       onClose();
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Failed to create ticket. Please try again.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to create ticket. Please try again.'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl max-w-xl w-full p-5 relative my-8 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy="create-ticket-modal-title"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+      panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl max-w-xl w-full p-5 relative my-8 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col"
+    >
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
           <div>
             <div className="font-mono text-[10px] text-zinc-500 uppercase tracking-wider mb-0.5">
               OFFICIAL ESCALATION
             </div>
-            <h2 className="text-base font-semibold text-zinc-100">Submit Engineering Support Ticket</h2>
+            <h2 id="create-ticket-modal-title" className="text-base font-semibold text-zinc-100">Submit Engineering Support Ticket</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close dialog"
             className="text-zinc-400 hover:text-zinc-200 p-1 rounded-md hover:bg-zinc-800 transition"
           >
             <X className="w-4 h-4" />
@@ -279,7 +295,7 @@ export const CreateTicketModal: React.FC<Props> = ({
                         <input
                           type="text"
                           required={field.required}
-                          value={customFields[field.key] || ''}
+                          value={textValue(customFields[field.key])}
                           onChange={(e) => handleCustomFieldChange(field.key, e.target.value)}
                           placeholder={field.placeholder || ''}
                           className="w-full text-xs px-2.5 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 focus:border-zinc-500 focus:outline-none transition"
@@ -290,7 +306,7 @@ export const CreateTicketModal: React.FC<Props> = ({
                         <input
                           type="number"
                           required={field.required}
-                          value={customFields[field.key] || ''}
+                          value={textValue(customFields[field.key])}
                           onChange={(e) => handleCustomFieldChange(field.key, e.target.value)}
                           placeholder={field.placeholder || ''}
                           className="w-full text-xs px-2.5 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 focus:border-zinc-500 focus:outline-none transition"
@@ -301,7 +317,7 @@ export const CreateTicketModal: React.FC<Props> = ({
                         <input
                           type="url"
                           required={field.required}
-                          value={customFields[field.key] || ''}
+                          value={textValue(customFields[field.key])}
                           onChange={(e) => handleCustomFieldChange(field.key, e.target.value)}
                           placeholder={field.placeholder || 'https://...'}
                           className="w-full text-xs px-2.5 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 focus:border-zinc-500 focus:outline-none transition font-mono"
@@ -311,7 +327,7 @@ export const CreateTicketModal: React.FC<Props> = ({
                       {field.type === 'select' && (
                         <select
                           required={field.required}
-                          value={customFields[field.key] || ''}
+                          value={textValue(customFields[field.key])}
                           onChange={(e) => handleCustomFieldChange(field.key, e.target.value)}
                           className="w-full text-xs px-2.5 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 focus:border-zinc-500 focus:outline-none transition"
                         >
@@ -341,7 +357,7 @@ export const CreateTicketModal: React.FC<Props> = ({
                         <textarea
                           rows={2}
                           required={field.required}
-                          value={customFields[field.key] || ''}
+                          value={textValue(customFields[field.key])}
                           onChange={(e) => handleCustomFieldChange(field.key, e.target.value)}
                           placeholder={field.placeholder || ''}
                           className="w-full text-xs p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 focus:border-zinc-500 focus:outline-none transition resize-none"
@@ -440,7 +456,6 @@ export const CreateTicketModal: React.FC<Props> = ({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 };

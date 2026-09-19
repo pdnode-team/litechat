@@ -1,12 +1,13 @@
-from typing import List
+from typing import Annotated
 from litestar import Controller, get, post, patch, delete, Request
+from litestar.params import PathParameter
 from litestar.exceptions import (
     NotAuthorizedException,
     PermissionDeniedException,
     NotFoundException,
     ValidationException,
 )
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.db.session import async_session_factory
 from app.models.canned_response import CannedResponse
 from app.schemas.canned_response import (
@@ -14,13 +15,19 @@ from app.schemas.canned_response import (
     CannedResponseUpdate,
     CannedResponseResponse,
 )
+from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
 
 class CannedResponseController(Controller):
     path = "/api/canned-responses"
 
     @get("/")
-    async def list_canned(self, request: Request) -> List[CannedResponseResponse]:
+    async def list_canned(
+        self,
+        request: Request,
+        limit: LimitParam = DEFAULT_PAGE_SIZE,
+        offset: OffsetParam = 0,
+    ) -> Page[CannedResponseResponse]:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -28,10 +35,18 @@ class CannedResponseController(Controller):
             raise PermissionDeniedException("Forbidden: Only support staff can access canned responses.")
 
         async with async_session_factory() as session:
-            stmt = select(CannedResponse).order_by(CannedResponse.shortcut.asc())
+            total = (
+                await session.execute(select(func.count()).select_from(CannedResponse))
+            ).scalar_one()
+            stmt = (
+                select(CannedResponse)
+                .order_by(CannedResponse.shortcut.asc())
+                .limit(limit)
+                .offset(offset)
+            )
             res = await session.execute(stmt)
-            items = res.scalars().all()
-            return [CannedResponseResponse.model_validate(i) for i in items]
+            items = [CannedResponseResponse.model_validate(i) for i in res.scalars().all()]
+            return Page[CannedResponseResponse](items=items, total=total, limit=limit, offset=offset)
 
     @post("/")
     async def create_canned(self, request: Request, data: CannedResponseCreate) -> CannedResponseResponse:
@@ -61,7 +76,7 @@ class CannedResponseController(Controller):
             return CannedResponseResponse.model_validate(item)
 
     @patch("/{response_id:int}")
-    async def update_canned(self, request: Request, response_id: int, data: CannedResponseUpdate) -> CannedResponseResponse:
+    async def update_canned(self, request: Request, response_id: Annotated[int, PathParameter()], data: CannedResponseUpdate) -> CannedResponseResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -87,7 +102,7 @@ class CannedResponseController(Controller):
             return CannedResponseResponse.model_validate(item)
 
     @delete("/{response_id:int}")
-    async def delete_canned(self, request: Request, response_id: int) -> None:
+    async def delete_canned(self, request: Request, response_id: Annotated[int, PathParameter()]) -> None:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")

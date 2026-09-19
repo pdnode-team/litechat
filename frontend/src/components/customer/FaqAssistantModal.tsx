@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { X, Search, Bot, HelpCircle, CornerDownRight, Sparkles, MessageSquarePlus } from 'lucide-react';
 import { faqApi } from '../../api/client';
 import { FaqItem, FaqQueryResult } from '../../types';
+import { Modal } from '../common/Modal';
 
 interface Props {
   isOpen: boolean;
@@ -32,12 +33,10 @@ export const FaqAssistantModal: React.FC<Props> = ({
     setQueryResult(null);
     setSelectedFaq(null);
 
-    faqApi.list({ active_only: true })
+    faqApi.listAll({ active_only: true })
       .then((items) => setRecentFaqs(items.slice(0, 8)))
       .catch((err) => console.error('Failed to load initial FAQs', err));
   }, [isOpen]);
-
-  if (!isOpen) return null;
 
   const handleSearch = async (textToSearch: string, categoryOverride?: string) => {
     if (!textToSearch.trim()) return;
@@ -67,8 +66,13 @@ export const FaqAssistantModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl max-w-2xl w-full p-5 relative animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      labelledBy="faq-assistant-modal-title"
+      className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+      panelClassName="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl max-w-2xl w-full p-5 relative animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col"
+    >
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
           <div className="flex items-center gap-2">
@@ -76,7 +80,7 @@ export const FaqAssistantModal: React.FC<Props> = ({
               <Bot className="w-4 h-4 text-emerald-400" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+              <h2 id="faq-assistant-modal-title" className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
                 <span>Self-Service & Diagnostic Engine</span>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
                   AI Triage
@@ -91,6 +95,7 @@ export const FaqAssistantModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close dialog"
             className="text-zinc-400 hover:text-zinc-200 p-1 rounded-md hover:bg-zinc-800 transition"
           >
             <X className="w-4 h-4" />
@@ -276,7 +281,6 @@ export const FaqAssistantModal: React.FC<Props> = ({
             <span>Create Official Ticket</span>
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 };

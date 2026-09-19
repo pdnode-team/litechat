@@ -6,6 +6,19 @@ export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 export type TicketCategory = 'technical' | 'billing' | 'account' | 'general';
 
+/** Envelope returned by every paginated list endpoint. */
+export interface Page<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PageParams {
+  limit?: number;
+  offset?: number;
+}
+
 export interface User {
   id: number;
   email: string;
@@ -14,6 +27,7 @@ export interface User {
   role: UserRole;
   avatar_url?: string;
   is_active: boolean;
+  email_verified: boolean;
   created_at: string;
 }
 
@@ -103,7 +117,7 @@ export interface Ticket {
   target_url?: string;
   ticket_type_id?: number;
   ticket_type?: TicketType;
-  custom_fields?: Record<string, any>;
+  custom_fields?: Record<string, unknown>;
   first_response_due_at?: string;
   resolution_due_at?: string;
   first_responded_at?: string;

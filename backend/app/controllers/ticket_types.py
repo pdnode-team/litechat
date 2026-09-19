@@ -1,16 +1,20 @@
 import json
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from litestar import Controller, get, post, put, delete, Request
 from litestar.exceptions import NotAuthorizedException, PermissionDeniedException, NotFoundException, ValidationException
-from sqlalchemy import select
+from litestar.params import PathParameter, QueryParameter
+from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from app.db.session import async_session_factory
 from app.models.ticket_type import TicketType
+from app.models.ticket import Ticket
 from app.schemas.ticket_type import (
     TicketTypeCreate,
     TicketTypeUpdate,
     TicketTypeResponse,
     CustomFieldDefinition,
 )
+from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
 
 def type_to_response(tt: TicketType) -> TicketTypeResponse:
@@ -36,18 +40,36 @@ class TicketTypeController(Controller):
     path = "/api/ticket-types"
 
     @get("/")
-    async def list_ticket_types(self, request: Request, active_only: Optional[bool] = None) -> List[TicketTypeResponse]:
+    async def list_ticket_types(
+        self,
+        request: Request,
+        active_only: Annotated[Optional[bool], QueryParameter()] = None,
+        limit: LimitParam = DEFAULT_PAGE_SIZE,
+        offset: OffsetParam = 0,
+    ) -> Page[TicketTypeResponse]:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
 
         async with async_session_factory() as session:
-            stmt = select(TicketType).order_by(TicketType.id.asc())
+            filters = []
             if active_only:
-                stmt = stmt.where(TicketType.is_active.is_(True))
+                filters.append(TicketType.is_active.is_(True))
+
+            total = (
+                await session.execute(select(func.count()).select_from(TicketType).where(*filters))
+            ).scalar_one()
+
+            stmt = (
+                select(TicketType)
+                .where(*filters)
+                .order_by(TicketType.id.asc())
+                .limit(limit)
+                .offset(offset)
+            )
             result = await session.execute(stmt)
-            types_list = result.scalars().all()
-            return [type_to_response(tt) for tt in types_list]
+            items = [type_to_response(tt) for tt in result.scalars().all()]
+            return Page[TicketTypeResponse](items=items, total=total, limit=limit, offset=offset)
 
     @post("/")
     async def create_ticket_type(self, request: Request, data: TicketTypeCreate) -> TicketTypeResponse:
@@ -76,7 +98,7 @@ class TicketTypeController(Controller):
             return type_to_response(new_type)
 
     @put("/{type_id:int}")
-    async def update_ticket_type(self, request: Request, type_id: int, data: TicketTypeUpdate) -> TicketTypeResponse:
+    async def update_ticket_type(self, request: Request, type_id: Annotated[int, PathParameter()], data: TicketTypeUpdate) -> TicketTypeResponse:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -104,7 +126,7 @@ class TicketTypeController(Controller):
             return type_to_response(tt)
 
     @delete("/{type_id:int}")
-    async def delete_ticket_type(self, request: Request, type_id: int) -> None:
+    async def delete_ticket_type(self, request: Request, type_id: Annotated[int, PathParameter()]) -> None:
         current_user = await get_current_user_from_request(request)
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
@@ -116,12 +138,18 @@ class TicketTypeController(Controller):
             if not tt:
                 raise NotFoundException("Ticket type not found.")
 
-            from app.models.ticket import Ticket
-            from sqlalchemy import func
+            # Friendly pre-check; the commit is the authoritative guard since a
+            # ticket can be created between the two statements.
             count_res = await session.execute(select(func.count(Ticket.id)).where(Ticket.ticket_type_id == type_id))
             used_count = count_res.scalar_one()
             if used_count > 0:
                 raise ValidationException(f"Cannot delete ticket type: {used_count} ticket(s) are currently associated with it.")
 
             await session.delete(tt)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                raise ValidationException(
+                    "Cannot delete ticket type: tickets were associated with it while it was being removed."
+                ) from None

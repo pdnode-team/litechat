@@ -1,6 +1,8 @@
 import json
 import logging
+from typing import Annotated
 from litestar import websocket
+from litestar.params import PathParameter
 from litestar.connection import WebSocket
 from app.db.session import async_session_factory
 from app.models.ticket import Ticket
@@ -10,7 +12,7 @@ from app.services.websocket_hub import hub, ConnectionInfo
 logger = logging.getLogger("websocket_controller")
 
 @websocket(path="/ws/tickets/{ticket_id:int}")
-async def ticket_websocket_handler(socket: WebSocket, ticket_id: int) -> None:
+async def ticket_websocket_handler(socket: WebSocket, ticket_id: Annotated[int, PathParameter()]) -> None:
     await socket.accept()
     
     token = socket.query_params.get("token")
