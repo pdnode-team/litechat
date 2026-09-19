@@ -14,6 +14,7 @@ from app.models.user import User
 from app.schemas.auth import UserResponse
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
+from app.services import events as event_bus
 
 class UpdateRoleRequest(BaseModel):
     role: str  # customer, agent, admin
@@ -113,6 +114,13 @@ class UserController(Controller):
             user.role = data.role
             await session.commit()
             await session.refresh(user)
+
+            await event_bus.publish_user_change(
+                user.id,
+                "role_changed",
+                actor_name=current_user.full_name,
+                actor_user_id=current_user.id,
+            )
             return UserResponse.model_validate(user)
 
     @patch("/{user_id:int}/status")
@@ -134,4 +142,11 @@ class UserController(Controller):
             user.is_active = data.is_active
             await session.commit()
             await session.refresh(user)
+
+            await event_bus.publish_user_change(
+                user.id,
+                "status_changed",
+                actor_name=current_user.full_name,
+                actor_user_id=current_user.id,
+            )
             return UserResponse.model_validate(user)

@@ -59,6 +59,57 @@ migrations are rewritten as create/copy/drop. Migrations that add a `NOT NULL` c
 a populated table must supply a `server_default` and backfill — see
 `migrations/versions/*_add_auth_tokens_and_email_verification.py` for the pattern.
 
+## Realtime
+
+Two WebSocket channels, both authenticated with the same bearer token
+(`?token=...`) and resolved against the database rather than the token claims,
+so a role change takes effect immediately:
+
+| Channel | Purpose |
+|---------|---------|
+| `/ws/tickets/{id}` | One conversation: `new_message`, `typing`, `ticket_updated` |
+| `/ws/notifications` | Account-wide: everything else the user may see |
+
+The notification channel puts a connection into rooms by role — the user's own
+room, plus `staff` (agent/admin) and `admin` (admin) — and sends a `ready` frame
+listing the subscribed rooms.
+
+Event types published by `app/services/events.py`:
+
+| Type | Sent to | Triggered by |
+|------|---------|--------------|
+| `ticket_created` | staff + the owning customer | ticket opened |
+| `ticket_updated` | customer, assignee, staff | status / priority / assignment / detail edit |
+| `message_created` | participants + staff | public reply (whispers exclude customers) |
+| `csat_submitted` | customer, assignee, staff | satisfaction rating |
+| `user_updated` | the affected user + admins | role or activation change |
+| `catalog_changed` | staff + admins | apps / ticket types / FAQ / macros CRUD |
+| `rate_limited` | the throttled user | credential endpoint limit hit |
+
+Routing lives in one place: controllers call `events.publish(...)` and the
+service decides which rooms and which emails an event maps to. A connection is
+never sent the same event twice, even when it belongs to several matching rooms.
+
+## Email notifications
+
+Sent for: a new ticket (all active staff), a public staff reply (the customer),
+a customer reply (the assignee, or all staff when unassigned), assignment (the
+new assignee) and resolve/close (the customer). **Internal notes never generate
+email.**
+
+Both email and notification behaviour are configurable at runtime from the admin
+UI (Admin console → *Email & Alerts*), and the values are stored in the
+`app_settings` table. Environment variables remain the fallback for anything an
+administrator has not saved, so an existing deployment keeps working unchanged.
+
+`GET/PUT /api/settings`, `PUT /api/settings/email`,
+`PUT /api/settings/notifications` and `POST /api/settings/email/test` are
+administrator-only. The SMTP password is stored encrypted (key derived from
+`JWT_SECRET_KEY`) and is never returned by the API — only `smtp_password_set`.
+
+If `smtp_host` is unset, outbound mail is written to the application log
+instead, so password-reset links stay usable in development.
+
 ## Pagination
 
 Every list endpoint returns a page envelope instead of a bare array:
@@ -164,4 +215,11 @@ the reassignment picker and is available to agents.
 - **No token revocation.** Password reset and logout do not invalidate already-issued
   JWTs; they stay valid until they expire.
 - **The rate limiter is per process.** Multiple workers need a shared store.
+- **Realtime is per process.** The WebSocket hub keeps connections in memory, so
+  running more than one worker means a client only receives events published by the
+  worker it is connected to; a shared pub/sub (e.g. Redis) is required to fan out
+  across workers.
+- **Notification email is synchronous** with the request that triggers it. Delivery
+  failures are logged and never fail the API call, but a slow SMTP server adds latency
+  to ticket creation.
 - No refresh tokens, no email change flow, no audit log.

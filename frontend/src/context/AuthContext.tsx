@@ -9,6 +9,8 @@ interface AuthContextType {
   login: (usernameOrEmail: string, pass: string) => Promise<void>;
   register: (email: string, username: string, fullName: string, pass: string) => Promise<void>;
   setupAdmin: (email: string, username: string, fullName: string, pass: string) => Promise<void>;
+  /** Re-read the profile; used when the account changes server-side. */
+  refreshUser: () => Promise<void>;
   logout: () => void;
 }
 
@@ -68,6 +70,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     persistSession(data.access_token, data.user);
   };
 
+  const refreshUser = useCallback(async () => {
+    if (!localStorage.getItem('litechat_token')) return;
+    try {
+      setUser(await authApi.getMe());
+    } catch {
+      // A failed refresh is handled by the 401 interceptor.
+    }
+  }, []);
+
   const canAccessAdmin = user?.role === 'admin';
 
   return (
@@ -79,6 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         setupAdmin,
+        refreshUser,
         logout,
       }}
     >

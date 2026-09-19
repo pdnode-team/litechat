@@ -14,6 +14,9 @@ import {
   CustomFieldDefinition,
   Page,
   PageParams,
+  AppSettings,
+  EmailSettingsUpdate,
+  NotificationSettingsUpdate,
 } from '../types';
 
 const api = axios.create({
@@ -379,6 +382,25 @@ export const csatApi = {
 export const analyticsApi = {
   getSummary: async () => {
     const res = await api.get<AnalyticsSummary>('/analytics/summary');
+    return res.data;
+  },
+};
+
+export const settingsApi = {
+  get: async (): Promise<AppSettings> => {
+    const res = await api.get<AppSettings>('/settings');
+    return res.data;
+  },
+  updateEmail: async (data: EmailSettingsUpdate): Promise<AppSettings> => {
+    const res = await api.put<AppSettings>('/settings/email', data);
+    return res.data;
+  },
+  updateNotifications: async (data: NotificationSettingsUpdate): Promise<AppSettings> => {
+    const res = await api.put<AppSettings>('/settings/notifications', data);
+    return res.data;
+  },
+  sendTestEmail: async (to: string): Promise<{ sent: boolean; detail: string }> => {
+    const res = await api.post<{ sent: boolean; detail: string }>('/settings/email/test', { to });
     return res.data;
   },
 };

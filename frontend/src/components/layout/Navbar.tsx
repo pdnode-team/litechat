@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useRealtimeEvent } from '../../context/RealtimeContext';
 import { authApi } from '../../api/client';
 import { UserAvatar } from '../common/UserAvatar';
+import { useToast } from '../common/Toast';
 import { apiErrorMessage } from '../../utils/errors';
 import { LogOut, MailWarning, X } from 'lucide-react';
 
@@ -19,9 +21,21 @@ export const Navbar: React.FC<NavbarProps> = ({
   rightActions,
 }) => {
   const { user, logout } = useAuth();
+  const { showError } = useToast();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [resendMessage, setResendMessage] = useState('');
+
+  // The server tells us when we get throttled, so the user learns why their
+  // request was rejected instead of just seeing a failure.
+  useRealtimeEvent(['rate_limited'], (event) => {
+    const retryAfter = typeof event.retry_after === 'number' ? event.retry_after : null;
+    showError(
+      retryAfter
+        ? `Too many requests. Try again in ${retryAfter}s.`
+        : 'Too many requests. Please slow down.'
+    );
+  });
 
   // Verification is advisory: an unconfirmed address only prompts, it never
   // blocks access, so this is a dismissible banner rather than a wall.

@@ -10,6 +10,7 @@ from app.models.ticket import Ticket
 from app.schemas.managed_app import ManagedAppCreate, ManagedAppUpdate, ManagedAppResponse
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
+from app.services import events as event_bus
 
 def app_to_response(app: ManagedApp) -> ManagedAppResponse:
     return ManagedAppResponse(
@@ -80,6 +81,7 @@ class ManagedAppController(Controller):
             session.add(new_app)
             await session.commit()
             await session.refresh(new_app)
+            await event_bus.publish_catalog_change("apps", "created", actor_name=current_user.full_name)
             return app_to_response(new_app)
 
     @put("/{app_id:int}")
@@ -106,6 +108,7 @@ class ManagedAppController(Controller):
 
             await session.commit()
             await session.refresh(app)
+            await event_bus.publish_catalog_change("apps", "updated", actor_name=current_user.full_name)
             return app_to_response(app)
 
     @delete("/{app_id:int}")
@@ -136,3 +139,5 @@ class ManagedAppController(Controller):
                 raise ValidationException(
                     "Cannot delete application: tickets were associated with it while it was being removed."
                 ) from None
+
+            await event_bus.publish_catalog_change("apps", "deleted", actor_name=current_user.full_name)

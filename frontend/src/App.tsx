@@ -1,5 +1,6 @@
 import React from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { RealtimeProvider } from './context/RealtimeContext';
 import { AuthView } from './components/auth/AuthView';
 import { PasswordRecoveryGate, hasRecoveryToken } from './components/auth/PasswordRecoveryView';
 import { ToastProvider } from './components/common/Toast';
@@ -41,7 +42,9 @@ export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
-        <RootContent />
+        <RealtimeProvider>
+          <RootContent />
+        </RealtimeProvider>
       </ToastProvider>
     </AuthProvider>
   );

@@ -24,6 +24,7 @@ import {
 import { formatUtc } from '../../utils/datetime';
 import { apiErrorMessage } from '../../utils/errors';
 import { useToast } from '../common/Toast';
+import { useRealtimeEvent } from '../../context/RealtimeContext';
 
 /** Rows fetched per "load more" step. */
 const PAGE_SIZE = 25;
@@ -110,6 +111,31 @@ export const CustomerPortal: React.FC = () => {
   }, [fetchTickets, user?.id]);
 
   const selectedTicketId = selectedTicket?.id ?? null;
+
+  // Live list: a status change or a reply from support updates the customer's
+  // own ticket list immediately. Messages for the open ticket arrive on the
+  // ticket socket, so this only refreshes the list to avoid double-appending.
+  const liveRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleListRefresh = useCallback(() => {
+    if (liveRefreshTimer.current) clearTimeout(liveRefreshTimer.current);
+    liveRefreshTimer.current = setTimeout(() => {
+      void fetchTickets();
+    }, 350);
+  }, [fetchTickets]);
+
+  useEffect(
+    () => () => {
+      if (liveRefreshTimer.current) clearTimeout(liveRefreshTimer.current);
+    },
+    []
+  );
+
+  useRealtimeEvent(['ticket_created', 'ticket_updated', 'message_created'], (event) => {
+    if (event.type === 'ticket_updated' && event.reason === 'status_changed') {
+      showSuccess('Your ticket status changed');
+    }
+    scheduleListRefresh();
+  });
 
   useEffect(() => {
     if (selectedTicketId === null) return;

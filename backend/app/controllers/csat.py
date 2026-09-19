@@ -8,6 +8,25 @@ from app.models.ticket import Ticket
 from app.models.csat_rating import CSATRating
 from app.schemas.csat import CSATCreate, CSATResponse
 from app.controllers.auth import get_current_user_from_request
+from app.services import events as event_bus
+from app.services.events import CSAT_SUBMITTED, Event
+
+
+def _csat_event(ticket: Ticket, score: int) -> Event:
+    """A rating changes the analytics and the ticket's satisfaction badge."""
+    return Event(
+        type=CSAT_SUBMITTED,
+        notification={
+            "ticket_id": ticket.id,
+            "ticket_code": ticket.ticket_code,
+            "score": score,
+            "customer_id": ticket.customer_id,
+            "assigned_agent_id": ticket.assigned_agent_id,
+        },
+        ticket_id=ticket.id,
+        user_ids=[ticket.customer_id] + ([ticket.assigned_agent_id] if ticket.assigned_agent_id else []),
+        staff=True,
+    )
 
 class CSATController(Controller):
     path = "/api/tickets/{ticket_id:int}/csat"
@@ -63,6 +82,7 @@ class CSATController(Controller):
                 existing.comment = data.comment
                 await session.commit()
                 await session.refresh(existing)
+                await event_bus.publish(_csat_event(ticket, existing.score))
                 return CSATResponse.model_validate(existing)
 
             rating = CSATRating(
@@ -74,5 +94,6 @@ class CSATController(Controller):
             session.add(rating)
             await session.commit()
             await session.refresh(rating)
+            await event_bus.publish(_csat_event(ticket, rating.score))
             return CSATResponse.model_validate(rating)
 

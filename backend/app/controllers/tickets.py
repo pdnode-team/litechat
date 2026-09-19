@@ -37,7 +37,63 @@ from app.controllers.auth import get_current_user_from_request
 from app.controllers.managed_apps import app_to_response
 from app.controllers.ticket_types import type_to_response
 from app.services.sla_service import calculate_sla_deadlines, get_sla_status
-from app.services.websocket_hub import hub
+from app.services import events as event_bus
+from app.services import notification_service
+from app.services.events import Event, TICKET_CREATED, TICKET_UPDATED
+
+
+async def publish_ticket_event(
+    ticket: Ticket,
+    resp: TicketResponse,
+    *,
+    reason: str,
+    event_type: str = TICKET_UPDATED,
+    email_kind: Optional[str] = None,
+    context: Optional[dict] = None,
+    actor_name: str = "Someone",
+) -> None:
+    """Fan a ticket change out to the conversation room, the queue and email.
+
+    Ticket events reach the owning customer, the assignee, and every staff
+    member, so an agent's queue updates live even for tickets they are not
+    looking at.
+    """
+    recipients = {ticket.customer_id}
+    if ticket.assigned_agent_id:
+        recipients.add(ticket.assigned_agent_id)
+
+    await event_bus.publish(
+        Event(
+            type=event_type,
+            notification={
+                "ticket_id": ticket.id,
+                "ticket_code": ticket.ticket_code,
+                "title": ticket.title,
+                "status": ticket.status,
+                "priority": ticket.priority,
+                "assigned_agent_id": ticket.assigned_agent_id,
+                "customer_id": ticket.customer_id,
+                "reason": reason,
+            },
+            ticket_payload={"type": event_type, "ticket": resp.model_dump(mode="json")},
+            ticket_id=ticket.id,
+            user_ids=sorted(recipients),
+            staff=True,
+            email_kind=email_kind,
+            context={
+                "ticket_id": ticket.id,
+                "ticket_code": ticket.ticket_code,
+                "title": ticket.title,
+                "status": ticket.status,
+                "priority": ticket.priority,
+                "customer_id": ticket.customer_id,
+                "assigned_agent_id": ticket.assigned_agent_id,
+                "actor_name": actor_name,
+                **(context or {}),
+            },
+        )
+    )
+
 
 def build_ticket_response(
     ticket: Ticket,
@@ -152,13 +208,26 @@ class TicketController(Controller):
             session.add(initial_msg)
             await session.commit()
 
-            return build_ticket_response(
+            resp = build_ticket_response(
                 ticket,
                 customer=current_user,
                 agent=None,
                 app=managed_app,
                 ticket_type=t_type,
             )
+
+            # New tickets appear instantly in every agent's queue, and staff are
+            # emailed so an unclaimed ticket does not sit unnoticed.
+            await publish_ticket_event(
+                ticket,
+                resp,
+                reason="created",
+                event_type=TICKET_CREATED,
+                email_kind=notification_service.KIND_NEW_TICKET,
+                actor_name=current_user.full_name,
+                context={"actor_email": current_user.email, "message_excerpt": ticket.description},
+            )
+            return resp
 
     @get("/")
     async def list_tickets(
@@ -348,9 +417,11 @@ class TicketController(Controller):
             resp = build_ticket_response(ticket, customer=customer, agent=agent, app=app, ticket_type=ticket_type)
 
             if changes:
-                await hub.broadcast(
-                    ticket.id,
-                    {"type": "ticket_updated", "ticket": resp.model_dump(mode="json")},
+                await publish_ticket_event(
+                    ticket,
+                    resp,
+                    reason="details_edited",
+                    actor_name=current_user.full_name,
                 )
             return resp
 
@@ -406,9 +477,14 @@ class TicketController(Controller):
             ticket_type = await session.get(TicketType, ticket.ticket_type_id) if ticket.ticket_type_id else None
             resp = build_ticket_response(ticket, customer=customer, agent=agent, app=app, ticket_type=ticket_type)
 
-            await hub.broadcast(
-                ticket.id,
-                {"type": "ticket_updated", "ticket": resp.model_dump(mode="json")},
+            # Tell the customer when their ticket is resolved or closed.
+            notify_customer = ticket.status in ("resolved", "closed") and ticket.status != old_status
+            await publish_ticket_event(
+                ticket,
+                resp,
+                reason="status_changed",
+                email_kind=notification_service.KIND_RESOLVED if notify_customer else None,
+                actor_name=current_user.full_name,
             )
             return resp
 
@@ -457,9 +533,12 @@ class TicketController(Controller):
             ticket_type = await session.get(TicketType, ticket.ticket_type_id) if ticket.ticket_type_id else None
             resp = build_ticket_response(ticket, customer=customer, agent=target_agent, app=app, ticket_type=ticket_type)
 
-            await hub.broadcast(
-                ticket.id,
-                {"type": "ticket_updated", "ticket": resp.model_dump(mode="json")},
+            await publish_ticket_event(
+                ticket,
+                resp,
+                reason="assignment_changed",
+                email_kind=notification_service.KIND_ASSIGNED if target_agent else None,
+                actor_name=current_user.full_name,
             )
             return resp
 
@@ -509,8 +588,10 @@ class TicketController(Controller):
             ticket_type = await session.get(TicketType, ticket.ticket_type_id) if ticket.ticket_type_id else None
             resp = build_ticket_response(ticket, customer=customer, agent=agent, app=app, ticket_type=ticket_type)
 
-            await hub.broadcast(
-                ticket.id,
-                {"type": "ticket_updated", "ticket": resp.model_dump(mode="json")},
+            await publish_ticket_event(
+                ticket,
+                resp,
+                reason="priority_changed",
+                actor_name=current_user.full_name,
             )
             return resp

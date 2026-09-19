@@ -16,6 +16,7 @@ from app.schemas.faq import (
 )
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
+from app.services import events as event_bus
 
 # Words that carry no signal and would otherwise match almost any article.
 STOPWORDS = {
@@ -205,6 +206,7 @@ class FaqController(Controller):
             session.add(new_faq)
             await session.commit()
             await session.refresh(new_faq)
+            await event_bus.publish_catalog_change("faq", "created", actor_name=current_user.full_name)
             return faq_to_response(new_faq)
 
     @put("/{faq_id:int}")
@@ -237,6 +239,7 @@ class FaqController(Controller):
 
             await session.commit()
             await session.refresh(item)
+            await event_bus.publish_catalog_change("faq", "updated", actor_name=current_user.full_name)
             return faq_to_response(item)
 
     @delete("/{faq_id:int}")
@@ -253,3 +256,5 @@ class FaqController(Controller):
                 raise NotFoundException("FAQ item not found.")
             await session.delete(item)
             await session.commit()
+
+        await event_bus.publish_catalog_change("faq", "deleted", actor_name=current_user.full_name)

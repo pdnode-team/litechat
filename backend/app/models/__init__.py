@@ -11,6 +11,7 @@ from app.models.auth_token import (
     PURPOSE_EMAIL_VERIFICATION,
     PURPOSE_PASSWORD_RESET,
 )
+from app.models.app_setting import AppSetting
 
 __all__ = [
     "User",
@@ -22,6 +23,7 @@ __all__ = [
     "TicketType",
     "FaqItem",
     "AuthToken",
+    "AppSetting",
     "PURPOSE_PASSWORD_RESET",
     "PURPOSE_EMAIL_VERIFICATION",
 ]

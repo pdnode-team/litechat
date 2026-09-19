@@ -14,10 +14,14 @@ from app.controllers.csat import CSATController
 from app.controllers.faq import FaqController
 from app.controllers.managed_apps import ManagedAppController
 from app.controllers.messages import MessageController, UploadController
+from app.controllers.settings import SettingsController
 from app.controllers.ticket_types import TicketTypeController
 from app.controllers.tickets import TicketController
 from app.controllers.users import UserController
-from app.controllers.websocket import ticket_websocket_handler
+from app.controllers.websocket import (
+    notifications_websocket_handler,
+    ticket_websocket_handler,
+)
 from app.db.seed import seed_initial_data
 from app.db.session import init_db
 from app.middleware import RateLimitMiddleware
@@ -87,7 +91,9 @@ app = Litestar(
         ManagedAppController,
         TicketTypeController,
         FaqController,
+        SettingsController,
         ticket_websocket_handler,
+        notifications_websocket_handler,
         static_files_router,
     ],
     cors_config=cors_config,

@@ -24,6 +24,7 @@ import {
 import { formatUtc } from '../../utils/datetime';
 import { apiErrorMessage } from '../../utils/errors';
 import { useToast } from '../common/Toast';
+import { useRealtimeEvent } from '../../context/RealtimeContext';
 
 /** Rows fetched per "load more" step. */
 const PAGE_SIZE = 25;
@@ -221,6 +222,34 @@ export const AgentWorkspace: React.FC = () => {
 
   // 2. Fetch Messages and Setup WebSocket
   const selectedTicketId = selectedTicket?.id ?? null;
+
+  // Live queue: any ticket or message event refreshes the list (debounced) so
+  // new tickets and changes made by other agents appear without a reload.
+  const liveRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleQueueRefresh = useCallback(() => {
+    if (liveRefreshTimer.current) clearTimeout(liveRefreshTimer.current);
+    liveRefreshTimer.current = setTimeout(() => {
+      void fetchTickets();
+    }, 350);
+  }, [fetchTickets]);
+
+  useEffect(
+    () => () => {
+      if (liveRefreshTimer.current) clearTimeout(liveRefreshTimer.current);
+    },
+    []
+  );
+
+  useRealtimeEvent(
+    ['ticket_created', 'ticket_updated', 'message_created', 'csat_submitted'],
+    (event) => {
+      if (event.type === 'ticket_created') {
+        const code = typeof event.ticket_code === 'string' ? event.ticket_code : 'New ticket';
+        showSuccess(`${code} just came in`);
+      }
+      scheduleQueueRefresh();
+    }
+  );
 
   useEffect(() => {
     if (selectedTicketId === null) return;

@@ -26,7 +26,9 @@ from app.schemas.pagination import (
     Page,
 )
 from app.controllers.auth import get_current_user_from_request
-from app.services.websocket_hub import hub
+from app.services import events as event_bus
+from app.services import notification_service
+from app.services.events import Event, MESSAGE_CREATED
 
 ALLOWED_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
@@ -155,13 +157,54 @@ class MessageController(Controller):
 
             resp = message_to_response(msg)
 
-            # Broadcast via WebSocket
-            await hub.broadcast(
-                ticket.id,
-                {
-                    "type": "new_message",
-                    "message": json.loads(resp.model_dump_json()),
-                },
+            is_whisper = safe_message_type == "whisper"
+            from_staff = current_user.role in ("agent", "admin")
+
+            # A whisper is staff-only and must never email the customer.
+            if is_whisper:
+                email_kind = None
+            elif from_staff:
+                email_kind = notification_service.KIND_STAFF_REPLY
+            else:
+                email_kind = notification_service.KIND_CUSTOMER_REPLY
+
+            recipients = {ticket.customer_id}
+            if ticket.assigned_agent_id:
+                recipients.add(ticket.assigned_agent_id)
+
+            await event_bus.publish(
+                Event(
+                    type=MESSAGE_CREATED,
+                    notification={
+                        "ticket_id": ticket.id,
+                        "ticket_code": ticket.ticket_code,
+                        "message_id": msg.id,
+                        "sender_id": current_user.id,
+                        "sender_role": current_user.role,
+                        "message_type": safe_message_type,
+                        "preview": data.content.strip()[:140],
+                        "assigned_agent_id": ticket.assigned_agent_id,
+                    },
+                    ticket_payload={
+                        "type": "new_message",
+                        "message": json.loads(resp.model_dump_json()),
+                    },
+                    ticket_id=ticket.id,
+                    user_ids=sorted(recipients),
+                    staff=True,
+                    whisper=is_whisper,
+                    email_kind=email_kind,
+                    context={
+                        "ticket_id": ticket.id,
+                        "ticket_code": ticket.ticket_code,
+                        "title": ticket.title,
+                        "customer_id": ticket.customer_id,
+                        "assigned_agent_id": ticket.assigned_agent_id,
+                        "actor_name": current_user.full_name,
+                        "actor_email": current_user.email,
+                        "message_excerpt": data.content.strip(),
+                    },
+                )
             )
 
             return resp

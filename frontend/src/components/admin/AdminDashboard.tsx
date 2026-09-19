@@ -34,15 +34,18 @@ import {
   ExternalLink,
   X,
   Pencil,
+  ServerCog,
 } from 'lucide-react';
 import { formatUtc } from '../../utils/datetime';
+import { useRealtimeEvent } from '../../context/RealtimeContext';
+import { EmailSettingsPanel } from './EmailSettingsPanel';
 
 /** Rows fetched per user-table page. */
 const PAGE_SIZE = 25;
 
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'users' | 'canned' | 'apps' | 'types' | 'faq'
+    'overview' | 'users' | 'canned' | 'apps' | 'types' | 'faq' | 'settings'
   >('overview');
 
   // Existing states
@@ -213,6 +216,35 @@ export const AdminDashboard: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Live console: account, catalogue and rating changes arrive over the
+  // notification socket, so the tables and analytics stay current without a
+  // manual refresh. Debounced because one action can emit several events.
+  const liveRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleDataRefresh = useCallback(() => {
+    if (liveRefreshTimer.current) clearTimeout(liveRefreshTimer.current);
+    liveRefreshTimer.current = setTimeout(() => {
+      void fetchData();
+    }, 400);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (liveRefreshTimer.current) clearTimeout(liveRefreshTimer.current);
+    },
+    []
+  );
+
+  useRealtimeEvent(['user_updated', 'catalog_changed', 'csat_submitted', 'ticket_created'], (event) => {
+    if (event.type === 'user_updated') {
+      const actor = typeof event.actor_name === 'string' ? event.actor_name : 'An administrator';
+      triggerToast(`Account updated by ${actor}`);
+    } else if (event.type === 'catalog_changed') {
+      const resource = typeof event.resource === 'string' ? event.resource.replace('_', ' ') : 'catalogue';
+      triggerToast(`${resource} changed`);
+    }
+    scheduleDataRefresh();
+  });
 
   const triggerToast = (msg: string) => {
     setActionMessage(msg);
@@ -736,8 +768,25 @@ export const AdminDashboard: React.FC = () => {
           >
             Macros
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className={`px-3 py-1 rounded transition whitespace-nowrap ${
+              activeTab === 'settings'
+                ? 'bg-zinc-800 text-zinc-100 font-medium'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <ServerCog className="w-3 h-3" />
+              Email &amp; Alerts
+            </span>
+          </button>
         </div>
       </div>
+
+      {/* TAB 7: EMAIL & NOTIFICATIONS */}
+      {activeTab === 'settings' && <EmailSettingsPanel />}
 
       {/* TAB 1: USERS & PERMISSIONS (RBAC) */}
       {activeTab === 'users' && (

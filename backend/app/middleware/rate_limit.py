@@ -8,6 +8,7 @@ are enforced globally instead of per process.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections import defaultdict, deque
 from typing import Awaitable, Callable, Deque, MutableMapping, Optional, Tuple
@@ -72,6 +73,56 @@ def _normalise_path(path: str) -> str:
     return path.rstrip("/") or "/"
 
 
+def _bearer_user_id(scope: Scope) -> Optional[int]:
+    """Best-effort user id from the Authorization header.
+
+    Rate limiting runs before authentication, so this only exists to tell the
+    affected client why its request was rejected. A missing or invalid token
+    simply means the notice is not delivered.
+    """
+    for name, value in scope.get("headers") or []:  # type: ignore[union-attr]
+        if name != b"authorization":
+            continue
+        try:
+            decoded = value.decode("latin-1") if isinstance(value, bytes) else str(value)
+        except Exception:
+            return None
+        if not decoded.lower().startswith("bearer "):
+            return None
+
+        # Imported lazily so the middleware has no import-time dependency on the
+        # auth stack (and so a token library issue cannot break rate limiting).
+        from app.services.auth_service import decode_access_token
+
+        payload = decode_access_token(decoded.split(" ", 1)[1].strip())
+        if not payload or "sub" not in payload:
+            return None
+        try:
+            return int(payload["sub"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+async def _publish_rate_limited(scope: Scope, path: str, retry_after: int) -> None:
+    user_id = _bearer_user_id(scope)
+    if user_id is None:
+        return
+    try:
+        from app.services import events as event_bus
+        from app.services.events import RATE_LIMITED, Event
+
+        await event_bus.publish(
+            Event(
+                type=RATE_LIMITED,
+                notification={"path": path, "retry_after": retry_after},
+                user_ids=[user_id],
+            )
+        )
+    except Exception:  # never let a notification failure mask the 429
+        logging.getLogger("litechat.ratelimit").debug("Could not publish rate_limited", exc_info=True)
+
+
 class RateLimitMiddleware:
     """ASGI middleware enforcing RATE_LIMIT_RULES on matching paths."""
 
@@ -94,6 +145,9 @@ class RateLimitMiddleware:
         allowed, retry_after = limiter.check(key, max_requests, window_seconds)
 
         if not allowed:
+            # Tell the affected client why, in real time, before rejecting it.
+            await _publish_rate_limited(scope, path, retry_after)
+
             # Written as a raw ASGI response: this middleware runs before the
             # router, so it must not depend on Litestar's response machinery.
             body = json.dumps(

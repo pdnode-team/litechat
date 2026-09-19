@@ -17,6 +17,7 @@ from app.schemas.canned_response import (
 )
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
+from app.services import events as event_bus
 
 class CannedResponseController(Controller):
     path = "/api/canned-responses"
@@ -73,6 +74,9 @@ class CannedResponseController(Controller):
             session.add(item)
             await session.commit()
             await session.refresh(item)
+            await event_bus.publish_catalog_change(
+                "canned_responses", "created", actor_name=current_user.full_name
+            )
             return CannedResponseResponse.model_validate(item)
 
     @patch("/{response_id:int}")
@@ -99,6 +103,9 @@ class CannedResponseController(Controller):
 
             await session.commit()
             await session.refresh(item)
+            await event_bus.publish_catalog_change(
+                "canned_responses", "updated", actor_name=current_user.full_name
+            )
             return CannedResponseResponse.model_validate(item)
 
     @delete("/{response_id:int}")
@@ -115,3 +122,7 @@ class CannedResponseController(Controller):
                 raise NotFoundException("Canned response not found.")
             await session.delete(item)
             await session.commit()
+
+        await event_bus.publish_catalog_change(
+            "canned_responses", "deleted", actor_name=current_user.full_name
+        )

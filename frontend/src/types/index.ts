@@ -19,6 +19,48 @@ export interface PageParams {
   offset?: number;
 }
 
+/** Runtime settings editable by an administrator (SMTP + notification policy). */
+export interface AppSettings {
+  smtp_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_username: string;
+  /** The password itself is never returned, only whether one is stored. */
+  smtp_password_set: boolean;
+  smtp_use_tls: boolean;
+  smtp_from: string;
+  public_app_url: string;
+  notify_new_ticket: boolean;
+  notify_ticket_reply: boolean;
+  notify_assignment: boolean;
+  notify_status_change: boolean;
+  support_email: string;
+}
+
+export type EmailSettingsUpdate = Partial<
+  Pick<
+    AppSettings,
+    | 'smtp_enabled'
+    | 'smtp_host'
+    | 'smtp_port'
+    | 'smtp_username'
+    | 'smtp_use_tls'
+    | 'smtp_from'
+    | 'public_app_url'
+  >
+> & { smtp_password?: string };
+
+export type NotificationSettingsUpdate = Partial<
+  Pick<
+    AppSettings,
+    | 'notify_new_ticket'
+    | 'notify_ticket_reply'
+    | 'notify_assignment'
+    | 'notify_status_change'
+    | 'support_email'
+  >
+>;
+
 export interface User {
   id: number;
   email: string;

@@ -16,6 +16,7 @@ from app.schemas.ticket_type import (
 )
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
+from app.services import events as event_bus
 
 def type_to_response(tt: TicketType) -> TicketTypeResponse:
     fields = []
@@ -95,6 +96,7 @@ class TicketTypeController(Controller):
             session.add(new_type)
             await session.commit()
             await session.refresh(new_type)
+            await event_bus.publish_catalog_change("ticket_types", "created", actor_name=current_user.full_name)
             return type_to_response(new_type)
 
     @put("/{type_id:int}")
@@ -123,6 +125,7 @@ class TicketTypeController(Controller):
 
             await session.commit()
             await session.refresh(tt)
+            await event_bus.publish_catalog_change("ticket_types", "updated", actor_name=current_user.full_name)
             return type_to_response(tt)
 
     @delete("/{type_id:int}")
@@ -153,3 +156,5 @@ class TicketTypeController(Controller):
                 raise ValidationException(
                     "Cannot delete ticket type: tickets were associated with it while it was being removed."
                 ) from None
+
+            await event_bus.publish_catalog_change("ticket_types", "deleted", actor_name=current_user.full_name)
