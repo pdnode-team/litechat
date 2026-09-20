@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, Text, Integer, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, TimestampMixin
+from app.db.base import Base, TimestampMixin, UTCDateTime
 
 class Ticket(Base, TimestampMixin):
     __tablename__ = "tickets"
@@ -30,10 +30,10 @@ class Ticket(Base, TimestampMixin):
     custom_fields_json: Mapped[Optional[str]] = mapped_column(Text, default="{}", nullable=True)
 
     # SLA Tracking Fields
-    first_response_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    resolution_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    first_responded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    first_response_due_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    resolution_due_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    first_responded_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     
     tags: Mapped[Optional[str]] = mapped_column(String(500), default="", nullable=True)

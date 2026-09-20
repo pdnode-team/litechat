@@ -8,11 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import PASSWORD_RESET_TTL_MINUTES, EMAIL_VERIFICATION_TTL_MINUTES
+from app.db.base import utcnow
 from app.models.auth_token import (
     PURPOSE_EMAIL_VERIFICATION,
     PURPOSE_PASSWORD_RESET,
     AuthToken,
-    utcnow_naive,
 )
 
 TTL_BY_PURPOSE = {
@@ -46,7 +46,7 @@ async def issue_token(session: AsyncSession, user_id: int, purpose: str) -> str:
             )
         )
     ).scalars().all()
-    now = utcnow_naive()
+    now = utcnow()
     for token in existing:
         # Superseded: mark as used so only the newest link works.
         token.used_at = now
@@ -85,6 +85,6 @@ async def consume_token(session: AsyncSession, raw_token: str, purpose: str) -> 
     if token is None or not token.is_usable:
         return None
 
-    token.used_at = utcnow_naive()
+    token.used_at = utcnow()
     await session.flush()
     return token

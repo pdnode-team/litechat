@@ -1,7 +1,6 @@
 import json
 import re
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, List
 from litestar import Controller, get, post, Request
@@ -16,6 +15,7 @@ from litestar.exceptions import (
 from sqlalchemy import select, func, desc
 from app.config import UPLOAD_DIR
 from app.db.session import async_session_factory
+from app.db.base import utcnow
 from app.models.message import Message
 from app.models.ticket import Ticket
 from app.schemas.message import MessageCreate, MessageResponse, AttachmentItem
@@ -130,7 +130,7 @@ class MessageController(Controller):
             else:
                 safe_message_type = "text"
 
-            now = datetime.now(timezone.utc)
+            now = utcnow()
             # If agent first response
             if current_user.role in ("agent", "admin") and not ticket.first_responded_at and safe_message_type != "whisper":
                 ticket.first_responded_at = now

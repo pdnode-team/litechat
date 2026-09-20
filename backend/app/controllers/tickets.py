@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 import json
 import secrets
 import uuid
@@ -13,6 +12,7 @@ from litestar.exceptions import (
 from litestar.params import PathParameter, QueryParameter
 from sqlalchemy import select, or_, desc, func
 from app.db.session import async_session_factory
+from app.db.base import utcnow
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.models.message import Message
@@ -151,7 +151,10 @@ class TicketController(Controller):
         if not current_user:
             raise NotAuthorizedException("Authentication required.")
 
-        now = datetime.now(timezone.utc)
+        # Naive UTC: every DateTime column is timezone-naive, and asyncpg refuses
+        # to bind an aware datetime to one (it raises on PostgreSQL, silently
+        # works on SQLite — so this only ever broke in production).
+        now = utcnow()
         first_due, res_due = calculate_sla_deadlines(data.priority, now)
 
         async with async_session_factory() as session:
@@ -449,7 +452,7 @@ class TicketController(Controller):
 
             old_status = ticket.status
             ticket.status = data.status
-            now = datetime.now(timezone.utc)
+            now = utcnow()
 
             if data.status in ("resolved", "closed") and not ticket.resolved_at:
                 ticket.resolved_at = now

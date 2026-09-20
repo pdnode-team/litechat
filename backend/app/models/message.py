@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Text, Integer, ForeignKey, DateTime
+from sqlalchemy import String, Text, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
-from app.db.base import Base
+from app.db.base import Base, UTCDateTime, utcnow
 
 class Message(Base):
     __tablename__ = "messages"
@@ -21,4 +21,4 @@ class Message(Base):
     # JSON string representing list of {name, url, type, size}
     attachments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)

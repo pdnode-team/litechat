@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Text, Integer, ForeignKey, DateTime
+from sqlalchemy import Text, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
-from app.db.base import Base
+from app.db.base import Base, UTCDateTime, utcnow
 
 class CSATRating(Base):
     __tablename__ = "csat_ratings"
@@ -14,4 +14,4 @@ class CSATRating(Base):
     score: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 to 5
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)

@@ -1,14 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
-
-
-def utcnow_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+from app.db.base import Base, UTCDateTime, utcnow
 
 
 class AppSetting(Base):
@@ -26,5 +22,5 @@ class AppSetting(Base):
     # Secrets are encrypted at rest and never returned by the API.
     is_secret: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False
+        UTCDateTime, default=utcnow, onupdate=utcnow, nullable=False
     )
