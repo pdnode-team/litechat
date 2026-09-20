@@ -11,10 +11,21 @@
 nixPkgs = ["nodejs_22", "pnpm"]
 
 [phases.install]
-# --prod=false is deliberate: the build script is `tsc -b && vite build`, and
-# both tsc and vite live in devDependencies. A build environment with
-# NODE_ENV=production would otherwise skip them and fail with "tsc: not found".
-cmds = ["pnpm install --frozen-lockfile --prod=false"]
+cmds = [
+    # Always install into an empty directory. A node_modules restored from a
+    # build cache can be missing platform-specific optional dependencies, which
+    # surfaces much later as "Cannot find native binding" from rolldown (the
+    # bundler behind Vite 8) rather than as an install error.
+    "rm -rf node_modules",
+    # --prod=false is deliberate: the build script is `tsc -b && vite build`, and
+    # both live in devDependencies. A build environment with NODE_ENV=production
+    # would otherwise skip them and fail with "tsc: not found".
+    "pnpm install --frozen-lockfile --prod=false",
+    # Diagnostic: print which rolldown platform bindings landed. If the build
+    # fails later on a native binding, this line in the log says whether the
+    # install or the runtime resolution is at fault.
+    "ls node_modules/.pnpm | grep -i rolldown || echo 'WARNING: no rolldown binding installed'",
+]
 
 [phases.build]
 cmds = ["pnpm build"]
