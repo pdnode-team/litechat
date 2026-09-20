@@ -109,6 +109,12 @@ ADMIN_NAME=System Administrator
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_LOGIN=10
 RATE_LIMIT_REGISTER=5
+
+# 日志：默认 INFO 输出到 stdout（Dokploy 会收集）。
+# 出错时排查 500 用得上，前端看到的 "reference: xxxxx" 就是这里打出来的 request id。
+LOG_LEVEL=INFO
+# 如果平台不留 stdout 日志，可以再加一个轮转文件（可选）
+# LOG_FILE=/app/logs/litechat.log
 ```
 
 关于 `TRUST_PROXY_HEADERS=true`：Traefik 会带 `X-Forwarded-For`，打开后限流才能按真实客户端 IP 统计。

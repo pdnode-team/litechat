@@ -6,27 +6,33 @@ from litestar.config.cors import CORSConfig
 from litestar.openapi.config import OpenAPIConfig
 from litestar.static_files import create_static_files_router
 
-from app.config import ENABLE_API_DOCS, IS_PRODUCTION, UPLOAD_DIR
-from app.controllers.analytics import AnalyticsController
-from app.controllers.auth import AuthController
-from app.controllers.canned_responses import CannedResponseController
-from app.controllers.csat import CSATController
-from app.controllers.faq import FaqController
-from app.controllers.managed_apps import ManagedAppController
-from app.controllers.messages import MessageController, UploadController
-from app.controllers.settings import SettingsController
-from app.controllers.ticket_types import TicketTypeController
-from app.controllers.tickets import TicketController
-from app.controllers.users import UserController
-from app.controllers.websocket import (
+from app.logging_config import configure_logging
+
+# Installed before anything else can log, so no line is lost and every line
+# carries the request id of the call that produced it.
+configure_logging()
+
+from app.config import ENABLE_API_DOCS, IS_PRODUCTION, UPLOAD_DIR  # noqa: E402
+from app.controllers.analytics import AnalyticsController  # noqa: E402
+from app.controllers.auth import AuthController  # noqa: E402
+from app.controllers.canned_responses import CannedResponseController  # noqa: E402
+from app.controllers.csat import CSATController  # noqa: E402
+from app.controllers.faq import FaqController  # noqa: E402
+from app.controllers.managed_apps import ManagedAppController  # noqa: E402
+from app.controllers.messages import MessageController, UploadController  # noqa: E402
+from app.controllers.settings import SettingsController  # noqa: E402
+from app.controllers.ticket_types import TicketTypeController  # noqa: E402
+from app.controllers.tickets import TicketController  # noqa: E402
+from app.controllers.users import UserController  # noqa: E402
+from app.controllers.websocket import (  # noqa: E402
     notifications_websocket_handler,
     ticket_websocket_handler,
 )
-from app.db.seed import seed_initial_data
-from app.db.session import init_db
-from app.middleware import RateLimitMiddleware
+from app.db.seed import seed_initial_data  # noqa: E402
+from app.db.session import init_db  # noqa: E402
+from app.exception_handlers import EXCEPTION_HANDLERS  # noqa: E402
+from app.middleware import RateLimitMiddleware, RequestContextMiddleware  # noqa: E402
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("litechat")
 
 
@@ -97,7 +103,10 @@ app = Litestar(
         static_files_router,
     ],
     cors_config=cors_config,
-    middleware=[RateLimitMiddleware],
+    # Ordered outermost first: the correlation id exists before rate limiting or
+    # routing runs, so even a rejected request is traceable.
+    middleware=[RequestContextMiddleware, RateLimitMiddleware],
+    exception_handlers=EXCEPTION_HANDLERS,
     on_startup=[on_app_startup],
     openapi_config=openapi_config,
 )

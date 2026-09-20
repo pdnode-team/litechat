@@ -38,6 +38,8 @@ annotated list. The essentials:
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | no | If both set, an administrator is seeded on startup. |
 | `SMTP_*` | no | Without `SMTP_HOST`, outbound email is logged instead of sent. |
 | `RATE_LIMIT_*` | no | Per-IP limits on the credential endpoints. |
+| `LOG_LEVEL` | no | Root log level, default `INFO`. |
+| `LOG_FILE` | no | Mirror the log into a rotating file (stdout is the default sink). |
 
 In development, if `JWT_SECRET_KEY` is unset, a random key is generated and persisted
 to `backend/.jwt_secret` (git-ignored). **Deleting that file invalidates all issued tokens.**
@@ -123,6 +125,72 @@ Every list endpoint returns a page envelope instead of a bare array:
 and each page is still returned in chronological order so older pages can be prepended
 directly.
 
+## Dynamic ticket forms
+
+A ticket type owns a JSON array of field definitions (`ticket_types.fields_schema_json`).
+The same definition drives three things that must stay in agreement:
+
+1. the admin builder (`frontend/src/components/admin/CustomFieldBuilder.tsx`),
+2. the customer form (`frontend/src/components/customer/CreateTicketModal.tsx`),
+3. `app/services/form_logic.py` — the **authoritative** validation.
+
+The browser copy in `frontend/src/utils/formLogic.ts` exists only to give immediate
+feedback; the client can be bypassed, so every rule is enforced again on the server. When
+a rule changes in one implementation, change it in the other.
+
+A field can declare:
+
+| Attribute | Meaning |
+|-----------|---------|
+| `type` | `text`, `textarea`, `select`, `multi_select`, `number`, `switch`, `url`, `date` |
+| `required`, `required_when` | Always mandatory, or mandatory only while a condition holds |
+| `visible_when` | The question is hidden (and its answer discarded) unless the condition holds |
+| `options`, `allow_other`, `other_label` | Choices for `select`/`multi_select`, plus a free-text "Other" |
+| `min_length`, `max_length`, `pattern` | Text constraints; `pattern` must match the **whole** value |
+| `min_value`, `max_value` | Numeric range |
+| `error_message` | Replaces the generated wording of a length/format/range failure |
+| `help_text`, `placeholder` | Presentation |
+
+Conditions are `{ logic: "all" | "any", conditions: [{ field, operator, value }] }`, where
+`operator` is one of `equals`, `not_equals`, `contains`, `not_contains`, `in`, `not_in`,
+`is_answered`, `is_empty`, `gt`, `gte`, `lt`, `lte`. A condition may only reference a field
+defined **above** the field that declares it; that is what makes a single forward pass
+sufficient and stops circular rules. `validate_field_schema()` rejects duplicates, unknown
+references, self references and forward references before a schema is stored.
+
+Consequences worth knowing:
+
+- Answers to hidden questions are **dropped**, not stored, so a tampered client cannot
+  smuggle an answer for a question it was never shown.
+- `multiselect` answers are JSON arrays; everything else is a scalar.
+- Empty answers are omitted rather than stored as empty strings.
+- The whole submission is capped at 32 KB and 50 custom fields.
+
+## Errors and logging
+
+Every rejected input is answered with the same body, so a form can attach each message to
+the input that caused it:
+
+```json
+{
+  "status_code": 422,
+  "detail": "3 problems need your attention.",
+  "errors": [
+    { "field": "title", "label": "Ticket Subject", "message": "...", "code": "too_short" },
+    { "field": "custom_fields.severity", "label": "Severity", "message": "...", "code": "required" }
+  ]
+}
+```
+
+`field` is the dotted path of the offending input (`title`, `custom_fields.<key>`),
+`code` is a machine readable reason. Litestar's own request-schema failures (status 400)
+are normalised into the same shape.
+
+Every response carries an `X-Request-ID` header; a client-supplied id is reused when it
+looks like an id. A `500` is logged with a full traceback, the method, the route, the
+caller and that request id, and the body repeats the id as a reference. **The request body
+is deliberately never logged** — it may contain a password or a reset token.
+
 ## Rate limiting
 
 Credential endpoints are limited per client IP (in-process sliding window): login,
@@ -182,10 +250,13 @@ table is non-empty.
 app/
   main.py              # Litestar app, CORS, static uploads, startup hooks
   config.py            # Env parsing, JWT secret resolution, SLA tables, limits
+  logging_config.py    # Logging setup, request-id context, record factory
+  exception_handlers.py# Uniform validation 4xx payloads + logged, referenced 500s
+  exceptions.py        # FormValidationError (a 422 carrying per-field messages)
   cli/create_admin.py  # Administrator bootstrap script
   controllers/         # REST + WebSocket route handlers (one module per resource)
-  middleware/          # ASGI middleware (rate limiting)
-  services/            # auth, SLA, WebSocket hub, tokens, email
+  middleware/          # ASGI middleware (request id/access log, rate limiting)
+  services/            # auth, SLA, WebSocket hub, tokens, email, form_logic
   models/              # SQLAlchemy ORM models
   schemas/             # Pydantic request/response models (+ pagination primitives)
   db/                  # Engine/session, declarative base, env seeding
@@ -223,3 +294,8 @@ the reassignment picker and is available to agents.
   failures are logged and never fail the API call, but a slow SMTP server adds latency
   to ticket creation.
 - No refresh tokens, no email change flow, no audit log.
+- **The form builder UI edits one condition per rule.** The stored schema and the
+  validator both accept an all/any group of conditions; the admin panel only writes the
+  single-condition form.
+- **Custom fields are not searchable.** `custom_fields_json` is plain JSON text, so only
+  title, description and ticket code are matched by `search=`.

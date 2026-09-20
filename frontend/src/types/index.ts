@@ -102,13 +102,99 @@ export interface ManagedApp {
   updated_at: string;
 }
 
+/** Comparison operators a conditional field rule may use. */
+export type ConditionOperator =
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'not_contains'
+  | 'in'
+  | 'not_in'
+  | 'is_answered'
+  | 'is_empty'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte';
+
+/** Where the labels come from, so the builder can render sensible inputs. */
+export const CONDITION_OPERATOR_LABELS: Record<ConditionOperator, string> = {
+  equals: 'is',
+  not_equals: 'is not',
+  contains: 'contains',
+  not_contains: 'does not contain',
+  in: 'is any of',
+  not_in: 'is none of',
+  is_answered: 'is answered',
+  is_empty: 'is empty',
+  gt: 'is greater than',
+  gte: 'is greater than or equal to',
+  lt: 'is less than',
+  lte: 'is less than or equal to',
+};
+
+/** Operators that ignore the comparison value entirely. */
+export const UNARY_CONDITION_OPERATORS: ConditionOperator[] = ['is_answered', 'is_empty'];
+
+export interface FieldCondition {
+  field: string;
+  operator: ConditionOperator;
+  value?: unknown;
+}
+
+/** Conditions combined with all/any semantics. */
+export interface ConditionGroup {
+  logic: 'all' | 'any';
+  conditions: FieldCondition[];
+}
+
+export type CustomFieldType =
+  | 'text'
+  | 'textarea'
+  | 'select'
+  | 'multi_select'
+  | 'number'
+  | 'switch'
+  | 'url'
+  | 'date';
+
+export const CUSTOM_FIELD_TYPES: CustomFieldType[] = [
+  'text',
+  'textarea',
+  'select',
+  'multi_select',
+  'number',
+  'switch',
+  'url',
+  'date',
+];
+
+/** A single answer. Multi-select answers are arrays of strings. */
+export type CustomFieldValue = string | number | boolean | string[];
+export type CustomFieldValues = Record<string, CustomFieldValue | undefined>;
+
 export interface CustomFieldDefinition {
   key: string;
   label: string;
-  type: 'text' | 'textarea' | 'select' | 'number' | 'switch' | 'url';
+  type: CustomFieldType;
   required: boolean;
   placeholder?: string;
+  help_text?: string;
+  /** Choices for `select` and `multi_select`. */
   options?: string[];
+  /** Offer an "Other" answer next to the choices. */
+  allow_other?: boolean;
+  other_label?: string;
+  min_length?: number | null;
+  max_length?: number | null;
+  /** The whole value must match this regular expression. */
+  pattern?: string | null;
+  min_value?: number | null;
+  max_value?: number | null;
+  /** Replaces the generated wording for length/pattern/range failures. */
+  error_message?: string | null;
+  visible_when?: ConditionGroup | null;
+  required_when?: ConditionGroup | null;
 }
 
 export interface TicketType {

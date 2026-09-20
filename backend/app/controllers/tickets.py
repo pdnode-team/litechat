@@ -1,7 +1,7 @@
 import json
 import secrets
 import uuid
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 from litestar import Controller, get, post, patch, Request
 from litestar.exceptions import (
     NotAuthorizedException,
@@ -18,6 +18,7 @@ from app.models.user import User
 from app.models.message import Message
 from app.models.managed_app import ManagedApp
 from app.models.ticket_type import TicketType
+from app.exceptions import FormValidationError
 from app.schemas.pagination import (
     DEFAULT_PAGE_SIZE,
     LimitParam,
@@ -32,10 +33,17 @@ from app.schemas.ticket import (
     TicketPriorityUpdateRequest,
     TicketUpdateRequest,
 )
+from app.schemas.ticket_type import CustomFieldDefinition
 from app.schemas.auth import UserResponse
 from app.controllers.auth import get_current_user_from_request
 from app.controllers.managed_apps import app_to_response
-from app.controllers.ticket_types import type_to_response
+from app.controllers.ticket_types import parse_fields_schema, type_to_response
+from app.services.form_logic import (
+    MAX_CUSTOM_FIELDS_JSON_BYTES,
+    FieldError,
+    validate_base_fields,
+    validate_custom_fields,
+)
 from app.services.sla_service import calculate_sla_deadlines, get_sla_status
 from app.services import events as event_bus
 from app.services import notification_service
@@ -155,7 +163,6 @@ class TicketController(Controller):
         # to bind an aware datetime to one (it raises on PostgreSQL, silently
         # works on SQLite — so this only ever broke in production).
         now = utcnow()
-        first_due, res_due = calculate_sla_deadlines(data.priority, now)
 
         async with async_session_factory() as session:
             ticket_code = None
@@ -168,32 +175,115 @@ class TicketController(Controller):
             if not ticket_code:
                 ticket_code = f"TCK-{now.year}-{uuid.uuid4().hex[:8].upper()}"
 
-            # Validate optional app and ticket_type
+            # Resolve the optional relations first. A missing or retired target
+            # used to be stored as-is (a dangling reference on SQLite) or to blow
+            # up as a foreign-key violation at commit time (Postgres, i.e. a 500).
+            # It is a client error, and the client deserves to be told which one.
+            problems: List[FieldError] = []
+
             managed_app = None
             if data.app_id:
                 managed_app = await session.get(ManagedApp, data.app_id)
+                if not managed_app:
+                    problems.append(
+                        FieldError("app_id", "The selected application does not exist.", "Application", "not_found")
+                    )
+                elif not managed_app.is_active:
+                    problems.append(
+                        FieldError(
+                            "app_id",
+                            f"The application '{managed_app.name}' is retired and no longer accepts tickets.",
+                            "Application",
+                            "inactive",
+                        )
+                    )
 
             t_type = None
+            fields_schema: List[CustomFieldDefinition] = []
             if data.ticket_type_id:
                 t_type = await session.get(TicketType, data.ticket_type_id)
+                if not t_type:
+                    problems.append(
+                        FieldError(
+                            "ticket_type_id",
+                            "The selected ticket type does not exist.",
+                            "Ticket type",
+                            "not_found",
+                        )
+                    )
+                elif not t_type.is_active:
+                    problems.append(
+                        FieldError(
+                            "ticket_type_id",
+                            f"The ticket type '{t_type.name}' is no longer available.",
+                            "Ticket type",
+                            "inactive",
+                        )
+                    )
+                else:
+                    fields_schema = parse_fields_schema(t_type.fields_schema_json)
 
-            custom_fields_json = json.dumps(data.custom_fields) if data.custom_fields else "{}"
+            # Built-in fields, then the answers to the dynamic form.
+            cleaned, base_problems = validate_base_fields(
+                title=data.title,
+                description=data.description,
+                tags=data.tags,
+                target_url=data.target_url,
+                category=data.category,
+                priority=data.priority,
+            )
+            problems.extend(base_problems)
+
+            if t_type is None:
+                custom_fields: Dict[str, Any] = {}
+                if data.custom_fields:
+                    problems.append(
+                        FieldError(
+                            "custom_fields",
+                            "Custom fields require a valid ticket type.",
+                            "Custom fields",
+                            "unexpected_fields",
+                        )
+                    )
+            else:
+                custom_fields, custom_problems = validate_custom_fields(fields_schema, data.custom_fields)
+                problems.extend(custom_problems)
+
+            if problems:
+                # Every rejected input at once, addressed by field, so the form
+                # can highlight all of them instead of one per attempt.
+                raise FormValidationError(problems)
+
+            custom_fields_json = json.dumps(custom_fields) if custom_fields else "{}"
+            if len(custom_fields_json.encode("utf-8")) > MAX_CUSTOM_FIELDS_JSON_BYTES:
+                raise FormValidationError(
+                    [
+                        FieldError(
+                            "custom_fields",
+                            "The submitted answers are too large to store.",
+                            "Custom fields",
+                            "too_large",
+                        )
+                    ]
+                )
+
+            first_due, res_due = calculate_sla_deadlines(cleaned["priority"], now)
 
             ticket = Ticket(
                 ticket_code=ticket_code,
-                title=data.title.strip(),
-                description=data.description.strip(),
+                title=cleaned["title"],
+                description=cleaned["description"],
                 status="open",
-                priority=data.priority,
-                category=data.category,
+                priority=cleaned["priority"],
+                category=cleaned["category"],
                 customer_id=current_user.id,
-                app_id=data.app_id,
-                target_url=data.target_url.strip() if data.target_url else None,
-                ticket_type_id=data.ticket_type_id,
+                app_id=managed_app.id if managed_app else None,
+                target_url=cleaned["target_url"],
+                ticket_type_id=t_type.id if t_type else None,
                 custom_fields_json=custom_fields_json,
                 first_response_due_at=first_due,
                 resolution_due_at=res_due,
-                tags=data.tags or "",
+                tags=cleaned["tags"],
             )
             session.add(ticket)
             await session.commit()
@@ -206,7 +296,7 @@ class TicketController(Controller):
                 sender_name=current_user.full_name,
                 sender_role=current_user.role,
                 message_type="text",
-                content=data.description.strip(),
+                content=cleaned["description"],
             )
             session.add(initial_msg)
             await session.commit()

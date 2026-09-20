@@ -6,14 +6,20 @@ from app.schemas.managed_app import ManagedAppResponse
 from app.schemas.ticket_type import TicketTypeResponse
 
 class TicketCreate(BaseModel):
-    title: str = Field(min_length=3, max_length=255)
-    description: str = Field(min_length=5)
+    # Content rules (minimum lengths, allowed categories, custom-field
+    # constraints) are enforced by `app.services.form_logic` rather than by
+    # Pydantic constraints here. Doing it in one place is what lets the API
+    # answer with a single field-addressed 422 payload instead of two different
+    # error shapes depending on which layer rejected the request.
+    title: str = ""
+    description: str = ""
     priority: Literal["low", "medium", "high", "urgent"] = "medium"
     category: Literal["technical", "billing", "account", "general"] = "general"
     tags: Optional[str] = ""
     app_id: Optional[int] = None
     target_url: Optional[str] = None
     ticket_type_id: Optional[int] = None
+    # Values may be str, number, bool or a list of str (multi_select).
     custom_fields: Optional[Dict[str, Any]] = None
 
 class TicketStatusUpdateRequest(BaseModel):

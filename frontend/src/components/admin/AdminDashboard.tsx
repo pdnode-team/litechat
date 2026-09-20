@@ -20,6 +20,7 @@ import {
 import { UserAvatar } from '../common/UserAvatar';
 import { Modal } from '../common/Modal';
 import { apiErrorMessage } from '../../utils/errors';
+import { CustomFieldBuilder } from './CustomFieldBuilder';
 import {
   Star,
   AlertTriangle,
@@ -87,13 +88,6 @@ export const AdminDashboard: React.FC = () => {
   const [typeCode, setTypeCode] = useState('');
   const [typeDescription, setTypeDescription] = useState('');
   const [typeFields, setTypeFields] = useState<CustomFieldDefinition[]>([]);
-  // Field builder temp inputs
-  const [fieldLabel, setFieldLabel] = useState('');
-  const [fieldKey, setFieldKey] = useState('');
-  const [fieldType, setFieldType] = useState<CustomFieldDefinition['type']>('text');
-  const [fieldRequired, setFieldRequired] = useState(false);
-  const [fieldPlaceholder, setFieldPlaceholder] = useState('');
-  const [fieldOptionsStr, setFieldOptionsStr] = useState('');
 
   // Ticket Type Editing state
   const [editingType, setEditingType] = useState<TicketType | null>(null);
@@ -102,12 +96,6 @@ export const AdminDashboard: React.FC = () => {
   const [editTypeDescription, setEditTypeDescription] = useState('');
   const [editTypeFields, setEditTypeFields] = useState<CustomFieldDefinition[]>([]);
   const [editTypeActive, setEditTypeActive] = useState(true);
-  const [editFieldLabel, setEditFieldLabel] = useState('');
-  const [editFieldKey, setEditFieldKey] = useState('');
-  const [editFieldType, setEditFieldType] = useState<CustomFieldDefinition['type']>('text');
-  const [editFieldRequired, setEditFieldRequired] = useState(false);
-  const [editFieldPlaceholder, setEditFieldPlaceholder] = useState('');
-  const [editFieldOptionsStr, setEditFieldOptionsStr] = useState('');
 
   // FAQ state
   const [faqList, setFaqList] = useState<FaqItem[]>([]);
@@ -346,36 +334,6 @@ export const AdminDashboard: React.FC = () => {
   };
 
   // Ticket Types & Custom Fields
-  const handleAddFieldToType = () => {
-    if (!fieldLabel.trim()) return;
-    const autoKey = fieldKey.trim() || fieldLabel.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    const options = fieldOptionsStr
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const newField: CustomFieldDefinition = {
-      label: fieldLabel.trim(),
-      key: autoKey,
-      type: fieldType,
-      required: fieldRequired,
-      placeholder: fieldPlaceholder.trim(),
-      options: options.length > 0 ? options : undefined,
-    };
-
-    setTypeFields((prev) => [...prev, newField]);
-    setFieldLabel('');
-    setFieldKey('');
-    setFieldType('text');
-    setFieldRequired(false);
-    setFieldPlaceholder('');
-    setFieldOptionsStr('');
-  };
-
-  const handleRemoveFieldFromType = (index: number) => {
-    setTypeFields((prev) => prev.filter((_, idx) => idx !== index));
-  };
-
   const handleAddTicketType = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!typeName.trim() || !typeCode.trim()) return;
@@ -514,42 +472,6 @@ export const AdminDashboard: React.FC = () => {
     setEditTypeDescription(tt.description || '');
     setEditTypeFields([...tt.fields_schema]);
     setEditTypeActive(tt.is_active);
-    setEditFieldLabel('');
-    setEditFieldKey('');
-    setEditFieldType('text');
-    setEditFieldRequired(false);
-    setEditFieldPlaceholder('');
-    setEditFieldOptionsStr('');
-  };
-
-  const handleAddEditFieldToType = () => {
-    if (!editFieldLabel.trim()) return;
-    const autoKey = editFieldKey.trim() || editFieldLabel.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    const options = editFieldOptionsStr
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const newField: CustomFieldDefinition = {
-      label: editFieldLabel.trim(),
-      key: autoKey,
-      type: editFieldType,
-      required: editFieldRequired,
-      placeholder: editFieldPlaceholder.trim(),
-      options: options.length > 0 ? options : undefined,
-    };
-
-    setEditTypeFields((prev) => [...prev, newField]);
-    setEditFieldLabel('');
-    setEditFieldKey('');
-    setEditFieldType('text');
-    setEditFieldRequired(false);
-    setEditFieldPlaceholder('');
-    setEditFieldOptionsStr('');
-  };
-
-  const handleRemoveEditFieldFromType = (index: number) => {
-    setEditTypeFields((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   const handleUpdateTicketType = async (e: React.FormEvent) => {
@@ -1520,108 +1442,8 @@ export const AdminDashboard: React.FC = () => {
                 />
               </div>
 
-              {/* Dynamic Field Builder Sub-section */}
-              <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
-                <div className="text-xs font-mono font-semibold text-zinc-300">
-                  Custom Properties Schema Builder
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase text-zinc-500 mb-1">Field Label *</label>
-                    <input
-                      type="text"
-                      value={fieldLabel}
-                      onChange={(e) => setFieldLabel(e.target.value)}
-                      placeholder="e.g. Browser Version"
-                      className="w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase text-zinc-500 mb-1">Field Type</label>
-                    <select
-                      value={fieldType}
-                      onChange={(e) => setFieldType(e.target.value as CustomFieldDefinition['type'])}
-                      className="w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 focus:outline-none font-mono"
-                    >
-                      <option value="text">Text (Single line)</option>
-                      <option value="textarea">Textarea (Multi line)</option>
-                      <option value="select">Select (Dropdown)</option>
-                      <option value="number">Number</option>
-                      <option value="switch">Switch (Yes/No)</option>
-                      <option value="url">URL</option>
-                    </select>
-                  </div>
-                </div>
-
-                {fieldType === 'select' && (
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase text-zinc-500 mb-1">
-                      Options (comma-separated)
-                    </label>
-                    <input
-                      type="text"
-                      value={fieldOptionsStr}
-                      onChange={(e) => setFieldOptionsStr(e.target.value)}
-                      placeholder="Chrome, Firefox, Safari, Edge"
-                      className="w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 focus:outline-none font-mono"
-                    />
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between pt-1">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-400 font-mono">
-                    <input
-                      type="checkbox"
-                      checked={fieldRequired}
-                      onChange={(e) => setFieldRequired(e.target.checked)}
-                      className="rounded bg-zinc-900 border-zinc-800 text-emerald-500 focus:ring-0"
-                    />
-                    Required field
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={handleAddFieldToType}
-                    disabled={!fieldLabel.trim()}
-                    className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono rounded transition disabled:opacity-40"
-                  >
-                    + Add Field
-                  </button>
-                </div>
-
-                {/* Field preview list */}
-                {typeFields.length > 0 && (
-                  <div className="pt-2 border-t border-zinc-800 space-y-1.5">
-                    <div className="text-[10px] font-mono text-zinc-500 uppercase">Configured Fields:</div>
-                    {typeFields.map((f, fIdx) => (
-                      <div
-                        key={fIdx}
-                        className="bg-zinc-900 border border-zinc-800 p-2 rounded flex items-center justify-between text-xs"
-                      >
-                        <div>
-                          <span className="font-semibold text-zinc-200">{f.label}</span>{' '}
-                          <span className="text-[10px] font-mono text-zinc-500">({f.type})</span>
-                          {f.required && <span className="text-rose-400 ml-1 font-mono text-[10px]">*req</span>}
-                          {f.options && (
-                            <div className="text-[10px] font-mono text-zinc-500">
-                              Options: {f.options.join(', ')}
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveFieldFromType(fIdx)}
-                          aria-label={`Remove field ${f.label}`}
-                          className="text-zinc-500 hover:text-rose-400 p-1"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* Dynamic Form Builder */}
+              <CustomFieldBuilder fields={typeFields} onChange={setTypeFields} />
 
               <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
                 <button
@@ -1995,109 +1817,8 @@ export const AdminDashboard: React.FC = () => {
                 </label>
               </div>
 
-              {/* Dynamic Field Builder Sub-section */}
-              <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
-                <div className="text-xs font-mono font-semibold text-zinc-300">
-                  Custom Properties Schema Builder
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase text-zinc-500 mb-1">Field Label</label>
-                    <input
-                      type="text"
-                      value={editFieldLabel}
-                      onChange={(e) => setEditFieldLabel(e.target.value)}
-                      placeholder="e.g. Browser Version"
-                      className="w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase text-zinc-500 mb-1">Field Type</label>
-                    <select
-                      value={editFieldType}
-                      onChange={(e) => setEditFieldType(e.target.value as CustomFieldDefinition['type'])}
-                      className="w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 focus:outline-none font-mono"
-                    >
-                      <option value="text">Text (Single line)</option>
-                      <option value="textarea">Textarea (Multi line)</option>
-                      <option value="select">Select (Dropdown)</option>
-                      <option value="number">Number</option>
-                      <option value="switch">Switch (Yes/No)</option>
-                      <option value="url">URL</option>
-                    </select>
-                  </div>
-                </div>
-
-                {editFieldType === 'select' && (
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase text-zinc-500 mb-1">
-                      Options (comma-separated)
-                    </label>
-                    <input
-                      type="text"
-                      value={editFieldOptionsStr}
-                      onChange={(e) => setEditFieldOptionsStr(e.target.value)}
-                      placeholder="Chrome, Firefox, Safari, Edge"
-                      className="w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 focus:outline-none font-mono"
-                    />
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between pt-1">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-400 font-mono">
-                    <input
-                      type="checkbox"
-                      checked={editFieldRequired}
-                      onChange={(e) => setEditFieldRequired(e.target.checked)}
-                      className="rounded bg-zinc-900 border-zinc-800 text-emerald-500 focus:ring-0"
-                    />
-                    Required field
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={handleAddEditFieldToType}
-                    disabled={!editFieldLabel.trim()}
-                    className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono rounded transition disabled:opacity-40"
-                  >
-                    + Add Field
-                  </button>
-                </div>
-
-                {/* Field preview list */}
-                {editTypeFields.length > 0 && (
-                  <div className="pt-2 border-t border-zinc-800 space-y-1.5">
-                    <div className="text-[10px] font-mono text-zinc-500 uppercase">Configured Fields ({editTypeFields.length}):</div>
-                    {editTypeFields.map((f, fIdx) => (
-                      <div
-                        key={fIdx}
-                        className="bg-zinc-900 border border-zinc-800 p-2 rounded flex items-center justify-between text-xs"
-                      >
-                        <div>
-                          <span className="font-semibold text-zinc-200">{f.label}</span>{' '}
-                          <span className="text-[10px] font-mono text-zinc-500">({f.type})</span>
-                          {f.required && <span className="text-rose-400 ml-1 font-mono text-[10px]">*req</span>}
-                          {f.options && (
-                            <div className="text-[10px] font-mono text-zinc-500">
-                              Options: {f.options.join(', ')}
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveEditFieldFromType(fIdx)}
-                          aria-label={`Remove field ${f.label}`}
-                          className="text-zinc-500 hover:text-rose-400 p-1"
-                          title="Remove Field"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* Dynamic Form Builder */}
+              <CustomFieldBuilder fields={editTypeFields} onChange={setEditTypeFields} />
 
               <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
                 <button
