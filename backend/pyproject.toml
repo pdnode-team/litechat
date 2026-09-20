@@ -1,7 +1,7 @@
 [project]
-name = "backend"
+name = "litechat-backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "LiteChat support desk API (Litestar + SQLAlchemy)"
 readme = "README.md"
 authors = [
     { name = "BretRen", email = "bretren2013@gmail.com" }
@@ -24,12 +24,12 @@ dependencies = [
     "websockets>=17.1",
 ]
 
-[project.scripts]
-backend = "backend:main"
-
-[build-system]
-requires = ["uv_build>=0.12.5,<0.13.0"]
-build-backend = "uv_build"
+[tool.uv]
+# This is an application, not a distributable package: the code lives in `app/`
+# and runs from source. Without this, uv builds and installs a package named
+# after the project, and Nixpacks then infers `python -m <name>` as the start
+# command instead of the one in nixpacks.toml.
+package = false
 
 [dependency-groups]
 dev = [
@@ -40,4 +40,3 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 asyncio_mode = "auto"
-

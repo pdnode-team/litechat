@@ -1,19 +1,17 @@
 # Nixpacks build description for the LiteChat backend.
 #
 # Dokploy's default build type is Nixpacks, so there is no Dockerfile to
-# maintain: Nixpacks produces the image from this file plus the project
-# metadata. Point Dokploy's "Base Directory" for this application at `backend`.
+# maintain. Point Dokploy's "Base Directory" for this application at `backend`,
+# and make sure the start command below actually wins — see DEPLOY.md, because
+# Nixpacks otherwise infers its own start command for Python projects.
 
 [phases.setup]
 nixPkgs = ["python311", "uv"]
 
 [phases.install]
-# Split so the dependency layer is cached until pyproject.toml / uv.lock change.
-cmds = [
-    "uv sync --frozen --no-dev --no-install-project",
-    "uv sync --frozen --no-dev",
-]
+# The project is a non-package application ([tool.uv] package = false), so this
+# only installs dependencies. `--frozen` fails loudly if uv.lock is stale.
+cmds = ["uv sync --frozen --no-dev"]
 
 [start]
-# Applies migrations, then serves. `uv run` resolves the project virtualenv.
 cmd = "sh start.sh"
