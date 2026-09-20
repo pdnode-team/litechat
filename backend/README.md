@@ -198,6 +198,23 @@ looks like an id. A `500` is logged with a full traceback, the method, the route
 caller and that request id, and the body repeats the id as a reference. **The request body
 is deliberately never logged** — it may contain a password or a reset token.
 
+Values are also checked against the length of the column that stores them (`String(n)`) on
+every admin catalogue, and a duplicate on a unique `code`/`shortcut` column is answered as a
+field error. Both used to surface as an opaque 500 on PostgreSQL — a
+`StringDataRightTruncation` for an over-long value, a `UniqueViolation` for a duplicate —
+while SQLite accepted them happily, so neither ever showed up in development.
+
+One failure is deliberately *not* translated: a primary-key collision
+(`... unique constraint "managed_apps_pkey"`). That means the id sequence drifted out of
+sync with its table, usually after importing a dump, and answering "this code already
+exists" would send the operator chasing the wrong thing. It stays a logged 500, and the fix
+is to resynchronise the sequence:
+
+```sql
+SELECT setval(pg_get_serial_sequence('managed_apps','id'),
+              COALESCE((SELECT MAX(id) FROM managed_apps), 1));
+```
+
 ## Rate limiting
 
 Credential endpoints are limited per client IP (in-process sliding window): login,

@@ -11,6 +11,7 @@ from litestar.exceptions import (
 from litestar.params import PathParameter, QueryParameter
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
+from app.db.errors import is_unique_violation
 from app.db.session import async_session_factory
 from app.models.ticket_type import TicketType
 from app.models.ticket import Ticket
@@ -182,10 +183,12 @@ class TicketTypeController(Controller):
 
             try:
                 await session.commit()
-            except IntegrityError:
+            except IntegrityError as exc:
                 # The unique index is the authoritative guard: another admin may
                 # have created the same code between the check above and here.
                 await session.rollback()
+                if not is_unique_violation(exc, ("ix_ticket_types_code", "ticket_types.code")):
+                    raise
                 raise FormValidationError(
                     [FieldError("code", "A ticket type with this code already exists.", "Code", "duplicate")]
                 ) from None

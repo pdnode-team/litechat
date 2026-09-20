@@ -5,12 +5,15 @@ from litestar.exceptions import (
     NotAuthorizedException,
     PermissionDeniedException,
     NotFoundException,
-    ValidationException,
 )
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
+from app.db.errors import is_unique_violation
 from app.db.session import async_session_factory
+from app.exceptions import FormValidationError
 from app.models.canned_response import CannedResponse
 from app.schemas.canned_response import (
+    MAX_SHORTCUT_LENGTH,
     CannedResponseCreate,
     CannedResponseUpdate,
     CannedResponseResponse,
@@ -18,6 +21,35 @@ from app.schemas.canned_response import (
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
 from app.services import events as event_bus
+from app.services.form_logic import FieldError
+
+
+def normalise_shortcut(raw: str) -> str:
+    """Shortcuts are stored with a leading slash so they can be typed inline."""
+    value = raw.strip()
+    return value if value.startswith("/") else f"/{value}"
+
+
+def shortcut_problems(shortcut: str) -> list:
+    """The stored value carries the slash, so the limit applies *after* prefixing."""
+    if len(shortcut) > MAX_SHORTCUT_LENGTH:
+        return [
+            FieldError(
+                "shortcut",
+                f"The shortcut must be at most {MAX_SHORTCUT_LENGTH} characters "
+                "(including the leading '/').",
+                "Shortcut",
+                "too_long",
+            )
+        ]
+    return []
+
+
+def duplicate_shortcut_error(shortcut: str) -> FormValidationError:
+    return FormValidationError(
+        [FieldError("shortcut", f"The shortcut '{shortcut}' already exists.", "Shortcut", "duplicate")]
+    )
+
 
 class CannedResponseController(Controller):
     path = "/api/canned-responses"
@@ -57,13 +89,16 @@ class CannedResponseController(Controller):
         if current_user.role not in ("agent", "admin"):
             raise PermissionDeniedException("Forbidden: Only support staff can manage canned responses.")
 
-        shortcut = data.shortcut if data.shortcut.startswith("/") else f"/{data.shortcut}"
+        shortcut = normalise_shortcut(data.shortcut)
+        problems = shortcut_problems(shortcut)
+        if problems:
+            raise FormValidationError(problems)
 
         async with async_session_factory() as session:
             stmt = select(CannedResponse).where(CannedResponse.shortcut == shortcut)
             existing = (await session.execute(stmt)).scalar_one_or_none()
             if existing:
-                raise ValidationException(f"Shortcut '{shortcut}' already exists.")
+                raise duplicate_shortcut_error(shortcut)
 
             item = CannedResponse(
                 shortcut=shortcut,
@@ -72,7 +107,14 @@ class CannedResponseController(Controller):
                 category=data.category,
             )
             session.add(item)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError as exc:
+                # Another user may have taken the shortcut since the check above.
+                await session.rollback()
+                if not is_unique_violation(exc, ("ix_canned_responses_shortcut", "canned_responses.shortcut")):
+                    raise
+                raise duplicate_shortcut_error(shortcut) from None
             await session.refresh(item)
             await event_bus.publish_catalog_change(
                 "canned_responses", "created", actor_name=current_user.full_name
@@ -93,7 +135,19 @@ class CannedResponseController(Controller):
                 raise NotFoundException("Canned response not found.")
 
             if data.shortcut:
-                item.shortcut = data.shortcut if data.shortcut.startswith("/") else f"/{data.shortcut}"
+                shortcut = normalise_shortcut(data.shortcut)
+                problems = shortcut_problems(shortcut)
+                if problems:
+                    raise FormValidationError(problems)
+                if shortcut != item.shortcut:
+                    clash = await session.execute(
+                        select(CannedResponse).where(
+                            CannedResponse.shortcut == shortcut, CannedResponse.id != item.id
+                        )
+                    )
+                    if clash.scalar_one_or_none():
+                        raise duplicate_shortcut_error(shortcut)
+                item.shortcut = shortcut
             if data.title:
                 item.title = data.title.strip()
             if data.content:
@@ -101,7 +155,13 @@ class CannedResponseController(Controller):
             if data.category:
                 item.category = data.category
 
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError as exc:
+                await session.rollback()
+                if not is_unique_violation(exc, ("ix_canned_responses_shortcut", "canned_responses.shortcut")):
+                    raise
+                raise duplicate_shortcut_error(item.shortcut) from None
             await session.refresh(item)
             await event_bus.publish_catalog_change(
                 "canned_responses", "updated", actor_name=current_user.full_name
