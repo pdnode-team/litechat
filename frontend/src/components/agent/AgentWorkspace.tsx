@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { formatUtc } from '../../utils/datetime';
 import { apiErrorMessage } from '../../utils/errors';
+import { mergeMessage } from '../../utils/messages';
 import { useToast } from '../common/Toast';
 import { useRealtimeEvent } from '../../context/RealtimeContext';
 
@@ -284,11 +285,18 @@ export const AgentWorkspace: React.FC = () => {
     ws.onMessage((data) => {
       if (selectedTicketRef.current !== currentTicketId) return;
       if (data.type === 'new_message' && data.message) {
-        setMessages((prev) => (prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]));
+        setMessages((prev) => mergeMessage(prev, data.message));
         setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       } else if (data.type === 'ticket_updated' && data.ticket) {
         setSelectedTicket(data.ticket);
         setTickets((prev) => prev.map((t) => (t.id === data.ticket.id ? data.ticket : t)));
+        // The status/priority/assignment change also wrote an action card into
+        // the conversation, which belongs in the timeline right now.
+        const card = data.message;
+        if (card) {
+          setMessages((prev) => mergeMessage(prev, card));
+          setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
       } else if (data.type === 'typing') {
         if (data.is_typing) {
           setTypingUsers((prev) => (prev.includes(data.user_name) ? prev : [...prev, data.user_name]));

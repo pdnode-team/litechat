@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { formatUtc } from '../../utils/datetime';
 import { apiErrorMessage } from '../../utils/errors';
+import { mergeMessage } from '../../utils/messages';
 import { useToast } from '../common/Toast';
 import { useRealtimeEvent } from '../../context/RealtimeContext';
 
@@ -169,14 +170,18 @@ export const CustomerPortal: React.FC = () => {
     ws.onMessage((data) => {
       if (data.type === 'new_message' && data.message) {
         if (data.message.message_type === 'whisper') return;
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === data.message.id)) return prev;
-          return [...prev, data.message];
-        });
+        setMessages((prev) => mergeMessage(prev, data.message));
         setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       } else if (data.type === 'ticket_updated' && data.ticket) {
         setSelectedTicket(data.ticket);
         fetchTickets();
+        // Status changes carry the action card they wrote, so the customer sees
+        // "Ticket status changed from ... to ..." without reloading.
+        const card = data.message;
+        if (card && card.message_type !== 'whisper') {
+          setMessages((prev) => mergeMessage(prev, card));
+          setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
       } else if (data.type === 'typing') {
         if (data.user_id !== user?.id) {
           setTypingUsers((prev) => {

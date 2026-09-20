@@ -35,8 +35,10 @@ from app.schemas.ticket import (
 )
 from app.schemas.ticket_type import CustomFieldDefinition
 from app.schemas.auth import UserResponse
+from app.schemas.message import MessageResponse
 from app.controllers.auth import get_current_user_from_request
 from app.controllers.managed_apps import app_to_response
+from app.controllers.messages import message_to_response
 from app.controllers.ticket_types import parse_fields_schema, type_to_response
 from app.services.form_logic import (
     MAX_CUSTOM_FIELDS_JSON_BYTES,
@@ -59,16 +61,26 @@ async def publish_ticket_event(
     email_kind: Optional[str] = None,
     context: Optional[dict] = None,
     actor_name: str = "Someone",
+    system_message: Optional[MessageResponse] = None,
 ) -> None:
     """Fan a ticket change out to the conversation room, the queue and email.
 
     Ticket events reach the owning customer, the assignee, and every staff
     member, so an agent's queue updates live even for tickets they are not
     looking at.
+
+    ``system_message`` is the action card the mutation just wrote into the
+    conversation ("Ticket status changed from ... to ..."). It travels in the
+    same ticket payload because the conversation view only appends messages it
+    receives: without it the card stayed invisible until a manual reload.
     """
     recipients = {ticket.customer_id}
     if ticket.assigned_agent_id:
         recipients.add(ticket.assigned_agent_id)
+
+    ticket_payload: Dict[str, Any] = {"type": event_type, "ticket": resp.model_dump(mode="json")}
+    if system_message is not None:
+        ticket_payload["message"] = json.loads(system_message.model_dump_json())
 
     await event_bus.publish(
         Event(
@@ -82,8 +94,9 @@ async def publish_ticket_event(
                 "assigned_agent_id": ticket.assigned_agent_id,
                 "customer_id": ticket.customer_id,
                 "reason": reason,
+                "message_id": system_message.id if system_message else None,
             },
-            ticket_payload={"type": event_type, "ticket": resp.model_dump(mode="json")},
+            ticket_payload=ticket_payload,
             ticket_id=ticket.id,
             user_ids=sorted(recipients),
             staff=True,
@@ -489,19 +502,20 @@ class TicketController(Controller):
                     changes.append("target URL updated")
                     ticket.target_url = new_url
 
+            action_msg: Optional[Message] = None
             if changes:
-                session.add(
-                    Message(
-                        ticket_id=ticket.id,
-                        sender_id=current_user.id,
-                        sender_name=current_user.full_name,
-                        sender_role="system",
-                        message_type="action_card",
-                        content=f"Ticket details edited by {current_user.full_name}: {', '.join(changes)}",
-                    )
+                action_msg = Message(
+                    ticket_id=ticket.id,
+                    sender_id=current_user.id,
+                    sender_name=current_user.full_name,
+                    sender_role="system",
+                    message_type="action_card",
+                    content=f"Ticket details edited by {current_user.full_name}: {', '.join(changes)}",
                 )
+                session.add(action_msg)
                 await session.commit()
                 await session.refresh(ticket)
+                await session.refresh(action_msg)
 
             customer = await session.get(User, ticket.customer_id)
             agent = await session.get(User, ticket.assigned_agent_id) if ticket.assigned_agent_id else None
@@ -515,6 +529,7 @@ class TicketController(Controller):
                     resp,
                     reason="details_edited",
                     actor_name=current_user.full_name,
+                    system_message=message_to_response(action_msg) if action_msg else None,
                 )
             return resp
 
@@ -563,6 +578,7 @@ class TicketController(Controller):
             session.add(sys_msg)
             await session.commit()
             await session.refresh(ticket)
+            await session.refresh(sys_msg)
 
             customer = await session.get(User, ticket.customer_id)
             agent = await session.get(User, ticket.assigned_agent_id) if ticket.assigned_agent_id else None
@@ -578,6 +594,7 @@ class TicketController(Controller):
                 reason="status_changed",
                 email_kind=notification_service.KIND_RESOLVED if notify_customer else None,
                 actor_name=current_user.full_name,
+                system_message=message_to_response(sys_msg),
             )
             return resp
 
@@ -620,6 +637,7 @@ class TicketController(Controller):
             session.add(sys_msg)
             await session.commit()
             await session.refresh(ticket)
+            await session.refresh(sys_msg)
 
             customer = await session.get(User, ticket.customer_id)
             app = await session.get(ManagedApp, ticket.app_id) if ticket.app_id else None
@@ -632,6 +650,7 @@ class TicketController(Controller):
                 reason="assignment_changed",
                 email_kind=notification_service.KIND_ASSIGNED if target_agent else None,
                 actor_name=current_user.full_name,
+                system_message=message_to_response(sys_msg),
             )
             return resp
 
@@ -674,6 +693,7 @@ class TicketController(Controller):
             session.add(sys_msg)
             await session.commit()
             await session.refresh(ticket)
+            await session.refresh(sys_msg)
 
             customer = await session.get(User, ticket.customer_id)
             agent = await session.get(User, ticket.assigned_agent_id) if ticket.assigned_agent_id else None
@@ -686,5 +706,6 @@ class TicketController(Controller):
                 resp,
                 reason="priority_changed",
                 actor_name=current_user.full_name,
+                system_message=message_to_response(sys_msg),
             )
             return resp

@@ -92,6 +92,11 @@ Routing lives in one place: controllers call `events.publish(...)` and the
 service decides which rooms and which emails an event maps to. A connection is
 never sent the same event twice, even when it belongs to several matching rooms.
 
+The conversation channel only appends messages it is told about, so a
+`ticket_updated` frame for a status/priority/assignment change **also carries the
+action card that change wrote** (`ticket_updated.message`). Without it the
+"Ticket status changed from … to …" bubble appeared only after a manual reload.
+
 ## Email notifications
 
 Sent for: a new ticket (all active staff), a public staff reply (the customer),

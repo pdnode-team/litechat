@@ -14,6 +14,12 @@ export interface WsNewMessage {
 export interface WsTicketUpdated {
   type: 'ticket_updated';
   ticket: Ticket;
+  /**
+   * Action card the mutation wrote into the conversation ("Ticket status changed
+   * from ... to ..."). The conversation view appends it so a status change shows
+   * up live instead of only after a reload.
+   */
+  message?: Message;
 }
 
 export interface WsTyping {

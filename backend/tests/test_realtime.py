@@ -225,6 +225,131 @@ async def test_http_mutations_publish_events(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_status_change_reaches_the_open_conversation_with_its_action_card():
+    """The reported bug: the chat view only appends messages it receives, so a
+    status change written as an action card stayed invisible until a reload.
+
+    The viewer is a real connection in the ticket room; the mutation goes through
+    the HTTP API, so this covers the whole path from `PATCH /status` to the frame.
+    """
+    async with AsyncTestClient(app=app) as client:
+        admin = await client.post(
+            "/api/auth/setup-admin",
+            json={
+                "email": "admin@realtimetest.com",
+                "username": "rt_admin",
+                "full_name": "RT Admin",
+                "password": "adminpass123",
+            },
+        )
+        admin_headers = {"Authorization": f"Bearer {admin.json()['access_token']}"}
+
+        customer = await client.post(
+            "/api/auth/register",
+            json={
+                "email": "viewer@realtimetest.com",
+                "username": "rt_viewer",
+                "full_name": "RT Viewer",
+                "password": "customerpass123",
+            },
+        )
+        customer_body = customer.json()
+        customer_headers = {"Authorization": f"Bearer {customer_body['access_token']}"}
+
+        ticket = (
+            await client.post(
+                "/api/tickets",
+                json={"title": "Status please", "description": "I want to see it live."},
+                headers=customer_headers,
+            )
+        ).json()
+
+        viewer = make_conn(
+            customer_body["user"]["id"], "customer", scope="ticket", ticket_id=ticket["id"]
+        )
+        await hub.connect(viewer)
+
+        await client.patch(
+            f"/api/tickets/{ticket['id']}/status", json={"status": "resolved"}, headers=admin_headers
+        )
+
+        frames = [frame for frame in viewer.socket.sent if frame["type"] == "ticket_updated"]
+        assert len(frames) == 1, viewer.socket.sent
+
+        frame = frames[0]
+        assert frame["ticket"]["status"] == "resolved"
+
+        card = frame["message"]
+        assert card["message_type"] == "action_card"
+        assert card["sender_role"] == "system"
+        assert "resolved" in card["content"]
+        assert card["id"]
+
+        # It is the same row the conversation endpoint returns, so the live view
+        # and a reload cannot disagree.
+        page = (
+            await client.get(f"/api/tickets/{ticket['id']}/messages", headers=admin_headers)
+        ).json()
+        assert any(message["id"] == card["id"] for message in page["items"])
+
+
+@pytest.mark.asyncio
+async def test_priority_and_assignment_changes_carry_their_action_cards():
+    async with AsyncTestClient(app=app) as client:
+        admin = await client.post(
+            "/api/auth/setup-admin",
+            json={
+                "email": "admin@realtimetest.com",
+                "username": "rt_admin",
+                "full_name": "RT Admin",
+                "password": "adminpass123",
+            },
+        )
+        admin_body = admin.json()
+        admin_headers = {"Authorization": f"Bearer {admin_body['access_token']}"}
+
+        customer = await client.post(
+            "/api/auth/register",
+            json={
+                "email": "viewer@realtimetest.com",
+                "username": "rt_viewer",
+                "full_name": "RT Viewer",
+                "password": "customerpass123",
+            },
+        )
+        customer_headers = {"Authorization": f"Bearer {customer.json()['access_token']}"}
+
+        ticket = (
+            await client.post(
+                "/api/tickets",
+                json={"title": "Priority please", "description": "I want to see it live."},
+                headers=customer_headers,
+            )
+        ).json()
+
+        viewer = make_conn(admin_body["user"]["id"], "admin", scope="ticket", ticket_id=ticket["id"])
+        await hub.connect(viewer)
+
+        await client.patch(
+            f"/api/tickets/{ticket['id']}/priority", json={"priority": "urgent"}, headers=admin_headers
+        )
+        await client.patch(
+            f"/api/tickets/{ticket['id']}/assign",
+            json={"agent_id": admin_body["user"]["id"]},
+            headers=admin_headers,
+        )
+
+        cards = [
+            frame["message"]["content"]
+            for frame in viewer.socket.sent
+            if frame["type"] == "ticket_updated"
+        ]
+        assert len(cards) == 2, viewer.socket.sent
+        assert "URGENT" in cards[0]
+        assert "assigned to RT Admin" in cards[1]
+
+
+@pytest.mark.asyncio
 async def test_notification_socket_requires_a_token():
     async with AsyncTestClient(app=app) as client:
         ws = await client.websocket_connect("/ws/notifications")
