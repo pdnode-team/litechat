@@ -2,7 +2,7 @@
 #
 # Point Dokploy's "Base Directory" for this application at `frontend`, set the
 # Build Type to Nixpacks, and set "Publish Directory" to `dist` so Dokploy serves
-# the built SPA with its nginx image.
+# the built SPA with its nginx image (which listens on port 80).
 #
 # The SPA talks to its own origin, so no build-time API URL is needed when
 # /api and /ws are routed to the backend on the same domain.
@@ -11,7 +11,10 @@
 nixPkgs = ["nodejs_22", "pnpm"]
 
 [phases.install]
-cmds = ["pnpm install --frozen-lockfile"]
+# --prod=false is deliberate: the build script is `tsc -b && vite build`, and
+# both tsc and vite live in devDependencies. A build environment with
+# NODE_ENV=production would otherwise skip them and fail with "tsc: not found".
+cmds = ["pnpm install --frozen-lockfile --prod=false"]
 
 [phases.build]
 cmds = ["pnpm build"]
