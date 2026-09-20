@@ -8,23 +8,22 @@
 # /api and /ws are routed to the backend on the same domain.
 
 [phases.setup]
-nixPkgs = ["nodejs_22", "pnpm"]
+# nodejs_24, not nodejs_22: rolldown (the bundler behind Vite 8) ships its native
+# binaries as optional dependencies that declare `engines: >=22.12.0`, and
+# nixpkgs' nodejs_22 resolves to 22.11.0. Optional dependencies whose engines do
+# not match are skipped silently, which shows up much later as
+# "Cannot find native binding".
+nixPkgs = ["nodejs_24", "pnpm"]
 
 [phases.install]
 cmds = [
-    # Always install into an empty directory. A node_modules restored from a
-    # build cache can be missing platform-specific optional dependencies, which
-    # surfaces much later as "Cannot find native binding" from rolldown (the
-    # bundler behind Vite 8) rather than as an install error.
+    # Start from an empty directory so nothing stale can survive a build cache.
     "rm -rf node_modules",
     # --prod=false is deliberate: the build script is `tsc -b && vite build`, and
-    # both live in devDependencies. A build environment with NODE_ENV=production
-    # would otherwise skip them and fail with "tsc: not found".
+    # both live in devDependencies.
     "pnpm install --frozen-lockfile --prod=false",
-    # Diagnostic: print which rolldown platform bindings landed. If the build
-    # fails later on a native binding, this line in the log says whether the
-    # install or the runtime resolution is at fault.
-    "ls node_modules/.pnpm | grep -i rolldown || echo 'WARNING: no rolldown binding installed'",
+    # Diagnostics: these two lines make the next failure self-explanatory.
+    "sh -c 'echo \"--- node ---\"; node -v; echo \"--- rolldown packages ---\"; ls node_modules/.pnpm | grep -i rolldown || echo NONE'",
 ]
 
 [phases.build]
