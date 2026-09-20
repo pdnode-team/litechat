@@ -75,6 +75,7 @@ export const AdminDashboard: React.FC = () => {
   const [appName, setAppName] = useState('');
   const [appCode, setAppCode] = useState('');
   const [appBaseUrl, setAppBaseUrl] = useState('');
+  const [appFormError, setAppFormError] = useState<string | null>(null);
   const [editingApp, setEditingApp] = useState<ManagedApp | null>(null);
   const [editAppName, setEditAppName] = useState('');
   const [editAppCode, setEditAppCode] = useState('');
@@ -116,6 +117,26 @@ export const AdminDashboard: React.FC = () => {
   const [editFaqActive, setEditFaqActive] = useState(true);
 
   const [fetchError, setFetchError] = useState<string | null>(null);
+  // A form submit that is already in flight must not be sent again. A double
+  // click used to insert the row twice and the second insert was rejected by a
+  // unique index, which the user saw as a confusing error about a row they had
+  // just created. The ref is what actually blocks re-entry: state updates are
+  // asynchronous, so a second click can arrive before the re-render.
+  const submittingRef = useRef<string | null>(null);
+  const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+
+  const beginSubmit = (action: string): boolean => {
+    if (submittingRef.current) return false;
+    submittingRef.current = action;
+    setSubmittingAction(action);
+    return true;
+  };
+
+  const endSubmit = (): void => {
+    submittingRef.current = null;
+    setSubmittingAction(null);
+  };
+
 
   const [usersTotal, setUsersTotal] = useState(0);
   const [loadingMoreUsers, setLoadingMoreUsers] = useState(false);
@@ -272,6 +293,8 @@ export const AdminDashboard: React.FC = () => {
   const handleAddCanned = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!shortcut || !title || !content) return;
+    if (!beginSubmit('canned:create')) return;
+
     try {
       const created = await cannedApi.create({
         shortcut: shortcut.startsWith('/') ? shortcut : `/${shortcut}`,
@@ -287,6 +310,8 @@ export const AdminDashboard: React.FC = () => {
       triggerToast(`Macro "${created.shortcut}" added`);
     } catch (err) {
       console.error('Failed to create canned response', err);
+    } finally {
+      endSubmit();
     }
   };
 
@@ -304,10 +329,22 @@ export const AdminDashboard: React.FC = () => {
   const handleAddApp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!appName.trim() || !appCode.trim()) return;
+
+    // The full catalogue is already loaded, so an obvious clash is caught here
+    // instead of as a round trip that ends in "already exists".
+    const normalisedCode = appCode.trim().toLowerCase();
+    if (appsList.some((existing) => existing.code === normalisedCode)) {
+      setAppFormError(`The code "${normalisedCode}" is already used by another application.`);
+      return;
+    }
+
+    if (!beginSubmit('app:create')) return;
+    setAppFormError(null);
+
     try {
       const created = await appsApi.create({
         name: appName.trim(),
-        code: appCode.trim().toLowerCase(),
+        code: normalisedCode,
         base_url: appBaseUrl.trim() || undefined,
         is_active: true,
       });
@@ -316,9 +353,13 @@ export const AdminDashboard: React.FC = () => {
       setAppName('');
       setAppCode('');
       setAppBaseUrl('');
+      setAppFormError(null);
       triggerToast(`Application "${created.name}" registered`);
     } catch (err) {
-      alert(apiErrorMessage(err, 'Failed to register app'));
+      // Shown inside the dialog: an alert() loses the field the user has to fix.
+      setAppFormError(apiErrorMessage(err, 'Failed to register app'));
+    } finally {
+      endSubmit();
     }
   };
 
@@ -337,6 +378,8 @@ export const AdminDashboard: React.FC = () => {
   const handleAddTicketType = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!typeName.trim() || !typeCode.trim()) return;
+    if (!beginSubmit('type:create')) return;
+
     try {
       const created = await ticketTypesApi.create({
         name: typeName.trim(),
@@ -354,6 +397,8 @@ export const AdminDashboard: React.FC = () => {
       triggerToast(`Ticket type "${created.name}" created`);
     } catch (err) {
       alert(apiErrorMessage(err, 'Failed to create ticket type'));
+    } finally {
+      endSubmit();
     }
   };
 
@@ -372,6 +417,8 @@ export const AdminDashboard: React.FC = () => {
   const handleAddFaq = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!faqQuestion.trim() || !faqAnswer.trim()) return;
+    if (!beginSubmit('faq:create')) return;
+
     try {
       const replies = faqQuickRepliesStr
         .split(',')
@@ -394,6 +441,8 @@ export const AdminDashboard: React.FC = () => {
       triggerToast('FAQ entry created');
     } catch (err) {
       alert(apiErrorMessage(err, 'Failed to create FAQ'));
+    } finally {
+      endSubmit();
     }
   };
 
@@ -420,6 +469,8 @@ export const AdminDashboard: React.FC = () => {
   const handleUpdateCanned = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCanned || !editShortcut.trim() || !editTitle.trim() || !editContent.trim()) return;
+    if (!beginSubmit('canned:update')) return;
+
     try {
       const updated = await cannedApi.update(editingCanned.id, {
         shortcut: editShortcut.startsWith('/') ? editShortcut.trim() : `/${editShortcut.trim()}`,
@@ -432,6 +483,8 @@ export const AdminDashboard: React.FC = () => {
       triggerToast(`Macro "${updated.shortcut}" updated`);
     } catch (err) {
       alert(apiErrorMessage(err, 'Failed to update macro'));
+    } finally {
+      endSubmit();
     }
   };
 
@@ -447,6 +500,8 @@ export const AdminDashboard: React.FC = () => {
   const handleUpdateApp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingApp || !editAppName.trim() || !editAppCode.trim()) return;
+    if (!beginSubmit('app:update')) return;
+
     try {
       const updated = await appsApi.update(editingApp.id, {
         name: editAppName.trim(),
@@ -461,6 +516,8 @@ export const AdminDashboard: React.FC = () => {
       triggerToast(`Application "${updated.name}" updated`);
     } catch (err) {
       alert(apiErrorMessage(err, 'Failed to update app'));
+    } finally {
+      endSubmit();
     }
   };
 
@@ -477,6 +534,8 @@ export const AdminDashboard: React.FC = () => {
   const handleUpdateTicketType = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingType || !editTypeName.trim() || !editTypeCode.trim()) return;
+    if (!beginSubmit('type:update')) return;
+
     try {
       const updated = await ticketTypesApi.update(editingType.id, {
         name: editTypeName.trim(),
@@ -490,6 +549,8 @@ export const AdminDashboard: React.FC = () => {
       triggerToast(`Ticket type "${updated.name}" updated`);
     } catch (err) {
       alert(apiErrorMessage(err, 'Failed to update ticket type'));
+    } finally {
+      endSubmit();
     }
   };
 
@@ -507,6 +568,8 @@ export const AdminDashboard: React.FC = () => {
   const handleUpdateFaq = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingFaq || !editFaqQuestion.trim() || !editFaqAnswer.trim()) return;
+    if (!beginSubmit('faq:update')) return;
+
     try {
       const replies = editFaqQuickRepliesStr
         .split(',')
@@ -526,6 +589,8 @@ export const AdminDashboard: React.FC = () => {
       triggerToast('FAQ article updated');
     } catch (err) {
       alert(apiErrorMessage(err, 'Failed to update FAQ'));
+    } finally {
+      endSubmit();
     }
   };
 
@@ -848,7 +913,10 @@ export const AdminDashboard: React.FC = () => {
             </div>
             <button
               type="button"
-              onClick={() => setIsAddAppOpen(true)}
+              onClick={() => {
+                setAppFormError(null);
+                setIsAddAppOpen(true);
+              }}
               className="px-3 py-1.5 bg-zinc-100 hover:bg-white text-zinc-950 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -1322,6 +1390,16 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <form onSubmit={handleAddApp} className="space-y-3">
+              {appFormError && (
+                <div
+                  role="alert"
+                  className="p-2.5 rounded-lg bg-rose-950/60 border border-rose-900 text-rose-300 text-xs flex items-start gap-2"
+                >
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>{appFormError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-[11px] font-mono uppercase text-zinc-400 mb-1">
                   Application Name *
@@ -1330,7 +1408,10 @@ export const AdminDashboard: React.FC = () => {
                   type="text"
                   required
                   value={appName}
-                  onChange={(e) => setAppName(e.target.value)}
+                  onChange={(e) => {
+                    setAppName(e.target.value);
+                    setAppFormError(null);
+                  }}
                   placeholder="e.g. Cloud Portal Web"
                   className="w-full text-xs p-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 focus:border-zinc-500 focus:outline-none transition"
                 />
@@ -1344,7 +1425,10 @@ export const AdminDashboard: React.FC = () => {
                   type="text"
                   required
                   value={appCode}
-                  onChange={(e) => setAppCode(e.target.value)}
+                  onChange={(e) => {
+                    setAppCode(e.target.value);
+                    setAppFormError(null);
+                  }}
                   placeholder="e.g. cloud_portal"
                   className="w-full text-xs p-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 font-mono focus:border-zinc-500 focus:outline-none transition"
                 />
@@ -1357,7 +1441,10 @@ export const AdminDashboard: React.FC = () => {
                 <input
                   type="url"
                   value={appBaseUrl}
-                  onChange={(e) => setAppBaseUrl(e.target.value)}
+                  onChange={(e) => {
+                    setAppBaseUrl(e.target.value);
+                    setAppFormError(null);
+                  }}
                   placeholder="https://cloud.example.com"
                   className="w-full text-xs p-2 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 font-mono focus:border-zinc-500 focus:outline-none transition"
                 />
@@ -1373,6 +1460,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submittingAction !== null}
                   className="px-3.5 py-1.5 text-xs font-semibold text-zinc-950 bg-zinc-100 hover:bg-white rounded-lg transition"
                 >
                   Save Application
@@ -1455,6 +1543,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submittingAction !== null}
                   className="px-3.5 py-1.5 text-xs font-semibold text-zinc-950 bg-zinc-100 hover:bg-white rounded-lg transition"
                 >
                   Save Ticket Type
@@ -1562,6 +1651,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submittingAction !== null}
                   className="px-3.5 py-1.5 text-xs font-semibold text-zinc-950 bg-zinc-100 hover:bg-white rounded-lg transition"
                 >
                   Save FAQ Article
@@ -1646,6 +1736,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submittingAction !== null}
                   className="px-3.5 py-1.5 text-xs font-medium text-zinc-950 bg-zinc-100 hover:bg-white rounded-lg shadow-sm transition"
                 >
                   Save Shortcut
@@ -1736,6 +1827,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submittingAction !== null}
                   className="px-3.5 py-1.5 text-xs font-semibold text-zinc-950 bg-zinc-100 hover:bg-white rounded-lg transition"
                 >
                   Update Application
@@ -1830,6 +1922,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submittingAction !== null}
                   className="px-3.5 py-1.5 text-xs font-semibold text-zinc-950 bg-zinc-100 hover:bg-white rounded-lg transition"
                 >
                   Update Ticket Type
@@ -1949,6 +2042,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submittingAction !== null}
                   className="px-3.5 py-1.5 text-xs font-semibold text-zinc-950 bg-zinc-100 hover:bg-white rounded-lg transition"
                 >
                   Update FAQ Article
@@ -2033,6 +2127,7 @@ export const AdminDashboard: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={submittingAction !== null}
                   className="px-3.5 py-1.5 text-xs font-medium text-zinc-950 bg-zinc-100 hover:bg-white rounded-lg shadow-sm transition"
                 >
                   Update Shortcut
