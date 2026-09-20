@@ -153,10 +153,12 @@ A field can declare:
 
 Conditions are `{ logic: "all" | "any", conditions: [{ field, operator, value }] }`, where
 `operator` is one of `equals`, `not_equals`, `contains`, `not_contains`, `in`, `not_in`,
-`is_answered`, `is_empty`, `gt`, `gte`, `lt`, `lte`. A condition may only reference a field
-defined **above** the field that declares it; that is what makes a single forward pass
-sufficient and stops circular rules. `validate_field_schema()` rejects duplicates, unknown
-references, self references and forward references before a schema is stored.
+`is_answered`, `is_empty`, `gt`, `gte`, `lt`, `lte`. A group may hold any number of
+conditions; the admin builder edits them one row at a time and switches the group between
+"match all" and "match any". A condition may only reference a field defined **above** the
+field that declares it; that is what makes a single forward pass sufficient and stops
+circular rules. `validate_field_schema()` rejects duplicates, unknown references, self
+references and forward references before a schema is stored.
 
 Consequences worth knowing:
 
@@ -294,8 +296,5 @@ the reassignment picker and is available to agents.
   failures are logged and never fail the API call, but a slow SMTP server adds latency
   to ticket creation.
 - No refresh tokens, no email change flow, no audit log.
-- **The form builder UI edits one condition per rule.** The stored schema and the
-  validator both accept an all/any group of conditions; the admin panel only writes the
-  single-condition form.
 - **Custom fields are not searchable.** `custom_fields_json` is plain JSON text, so only
   title, description and ticket code are matched by `search=`.

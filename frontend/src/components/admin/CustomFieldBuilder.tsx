@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { AlertCircle, GitBranch, Pencil, Plus, X } from 'lucide-react';
+import { AlertCircle, GitBranch, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type {
+  ConditionGroup,
   ConditionOperator,
   CustomFieldDefinition,
   CustomFieldType,
@@ -32,6 +33,13 @@ const TYPE_LABELS: Record<CustomFieldType, string> = {
 const CHOICE_TYPES: CustomFieldType[] = ['select', 'multi_select'];
 const LENGTH_TYPES: CustomFieldType[] = ['text', 'textarea', 'url', 'date'];
 
+/** One editable condition; `value` stays a string so the input stays controlled. */
+interface ConditionDraft {
+  field: string;
+  operator: ConditionOperator;
+  value: string;
+}
+
 /** Everything the builder edits, kept as strings so inputs stay controlled. */
 interface Draft {
   label: string;
@@ -49,13 +57,13 @@ interface Draft {
   error_message: string;
   min_value: string;
   max_value: string;
-  visibleField: string;
-  visibleOperator: ConditionOperator;
-  visibleValue: string;
-  requiredField: string;
-  requiredOperator: ConditionOperator;
-  requiredValue: string;
+  visibleLogic: 'all' | 'any';
+  visibleWhen: ConditionDraft[];
+  requiredLogic: 'all' | 'any';
+  requiredWhen: ConditionDraft[];
 }
+
+const newCondition = (): ConditionDraft => ({ field: '', operator: 'equals', value: '' });
 
 const emptyDraft = (): Draft => ({
   label: '',
@@ -73,12 +81,10 @@ const emptyDraft = (): Draft => ({
   error_message: '',
   min_value: '',
   max_value: '',
-  visibleField: '',
-  visibleOperator: 'equals',
-  visibleValue: '',
-  requiredField: '',
-  requiredOperator: 'equals',
-  requiredValue: '',
+  visibleLogic: 'all',
+  visibleWhen: [],
+  requiredLogic: 'all',
+  requiredWhen: [],
 });
 
 const slugify = (label: string): string =>
@@ -112,38 +118,40 @@ const conditionValueFor = (raw: string, target: CustomFieldDefinition | undefine
   return raw.trim();
 };
 
-const draftFromField = (field: CustomFieldDefinition): Draft => {
-  const visible = field.visible_when?.conditions?.[0];
-  const required = field.required_when?.conditions?.[0];
-  const renderValue = (condition?: FieldCondition) => {
-    if (!condition || condition.value === undefined || condition.value === null) return '';
-    if (Array.isArray(condition.value)) return condition.value.join(', ');
-    return String(condition.value);
-  };
-  return {
-    label: field.label,
-    key: field.key,
-    type: field.type,
-    required: Boolean(field.required),
-    placeholder: field.placeholder ?? '',
-    help_text: field.help_text ?? '',
-    optionsStr: (field.options ?? []).join(', '),
-    allow_other: Boolean(field.allow_other),
-    other_label: field.other_label || 'Other',
-    min_length: field.min_length === null || field.min_length === undefined ? '' : String(field.min_length),
-    max_length: field.max_length === null || field.max_length === undefined ? '' : String(field.max_length),
-    pattern: field.pattern ?? '',
-    error_message: field.error_message ?? '',
-    min_value: field.min_value === null || field.min_value === undefined ? '' : String(field.min_value),
-    max_value: field.max_value === null || field.max_value === undefined ? '' : String(field.max_value),
-    visibleField: visible?.field ?? '',
-    visibleOperator: visible?.operator ?? 'equals',
-    visibleValue: renderValue(visible),
-    requiredField: required?.field ?? '',
-    requiredOperator: required?.operator ?? 'equals',
-    requiredValue: renderValue(required),
-  };
+const renderConditionValue = (value: unknown): string => {
+  if (value === undefined || value === null) return '';
+  if (Array.isArray(value)) return value.join(', ');
+  return String(value);
 };
+
+const toConditionDrafts = (group?: ConditionGroup | null): ConditionDraft[] =>
+  (group?.conditions ?? []).map((condition) => ({
+    field: condition.field,
+    operator: condition.operator,
+    value: renderConditionValue(condition.value),
+  }));
+
+const draftFromField = (field: CustomFieldDefinition): Draft => ({
+  label: field.label,
+  key: field.key,
+  type: field.type,
+  required: Boolean(field.required),
+  placeholder: field.placeholder ?? '',
+  help_text: field.help_text ?? '',
+  optionsStr: (field.options ?? []).join(', '),
+  allow_other: Boolean(field.allow_other),
+  other_label: field.other_label || 'Other',
+  min_length: field.min_length === null || field.min_length === undefined ? '' : String(field.min_length),
+  max_length: field.max_length === null || field.max_length === undefined ? '' : String(field.max_length),
+  pattern: field.pattern ?? '',
+  error_message: field.error_message ?? '',
+  min_value: field.min_value === null || field.min_value === undefined ? '' : String(field.min_value),
+  max_value: field.max_value === null || field.max_value === undefined ? '' : String(field.max_value),
+  visibleLogic: field.visible_when?.logic ?? 'all',
+  visibleWhen: toConditionDrafts(field.visible_when),
+  requiredLogic: field.required_when?.logic ?? 'all',
+  requiredWhen: toConditionDrafts(field.required_when),
+});
 
 const buildField = (draft: Draft, targets: CustomFieldDefinition[]): CustomFieldDefinition => {
   const options = draft.optionsStr
@@ -151,18 +159,20 @@ const buildField = (draft: Draft, targets: CustomFieldDefinition[]): CustomField
     .map((part) => part.trim())
     .filter(Boolean);
 
-  const group = (
-    key: string,
-    operator: ConditionOperator,
-    rawValue: string,
-  ): CustomFieldDefinition['visible_when'] => {
-    if (!key) return null;
-    const target = targets.find((candidate) => candidate.key === key);
-    const condition: FieldCondition = { field: key, operator };
-    if (!UNARY_CONDITION_OPERATORS.includes(operator)) {
-      condition.value = conditionValueFor(rawValue, target, operator);
-    }
-    return { logic: 'all', conditions: [condition] };
+  const group = (logic: 'all' | 'any', drafts: ConditionDraft[]): ConditionGroup | null => {
+    const conditions: FieldCondition[] = drafts
+      // A row with no field selected is an unfinished rule, not a rule.
+      .filter((candidate) => candidate.field)
+      .map((candidate) => {
+        const target = targets.find((field) => field.key === candidate.field);
+        const condition: FieldCondition = { field: candidate.field, operator: candidate.operator };
+        if (!UNARY_CONDITION_OPERATORS.includes(candidate.operator)) {
+          condition.value = conditionValueFor(candidate.value, target, candidate.operator);
+        }
+        return condition;
+      });
+    if (conditions.length === 0) return null;
+    return { logic, conditions };
   };
 
   return {
@@ -181,13 +191,12 @@ const buildField = (draft: Draft, targets: CustomFieldDefinition[]): CustomField
     min_value: draft.type === 'number' ? numberOrNull(draft.min_value) : null,
     max_value: draft.type === 'number' ? numberOrNull(draft.max_value) : null,
     error_message: draft.error_message.trim() || null,
-    visible_when: group(draft.visibleField, draft.visibleOperator, draft.visibleValue),
-    required_when: group(draft.requiredField, draft.requiredOperator, draft.requiredValue),
+    visible_when: group(draft.visibleLogic, draft.visibleWhen),
+    required_when: group(draft.requiredLogic, draft.requiredWhen),
   };
 };
 
-const describeCondition = (condition?: FieldCondition): string => {
-  if (!condition) return '';
+const describeCondition = (condition: FieldCondition): string => {
   const operator = CONDITION_OPERATOR_LABELS[condition.operator] ?? condition.operator;
   if (UNARY_CONDITION_OPERATORS.includes(condition.operator)) {
     return `${condition.field} ${operator}`;
@@ -196,34 +205,40 @@ const describeCondition = (condition?: FieldCondition): string => {
   return `${condition.field} ${operator} "${value}"`;
 };
 
+/** "a is X" or "a is X and b is Y" — the stored group as one readable line. */
+const describeGroup = (group?: ConditionGroup | null): string => {
+  const conditions = group?.conditions ?? [];
+  if (conditions.length === 0) return '';
+  const joiner = group?.logic === 'any' ? ' or ' : ' and ';
+  return conditions.map(describeCondition).join(joiner);
+};
+
 const inputClass =
   'w-full text-xs p-1.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-100 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none';
 const labelClass = 'block text-[10px] font-mono uppercase text-zinc-500 mb-1';
 
 /** One "field / operator / value" row of a conditional rule. */
 const ConditionRow: React.FC<{
-  title: string;
   targets: CustomFieldDefinition[];
-  fieldKey: string;
-  operator: ConditionOperator;
-  value: string;
-  onChange: (next: { fieldKey?: string; operator?: ConditionOperator; value?: string }) => void;
-}> = ({ title, targets, fieldKey, operator, value, onChange }) => {
-  const target = targets.find((candidate) => candidate.key === fieldKey);
-  const isUnary = UNARY_CONDITION_OPERATORS.includes(operator);
-  const isList = operator === 'in' || operator === 'not_in';
+  condition: ConditionDraft;
+  onChange: (patch: Partial<ConditionDraft>) => void;
+  onRemove: () => void;
+}> = ({ targets, condition, onChange, onRemove }) => {
+  const target = targets.find((candidate) => candidate.key === condition.field);
+  const isUnary = UNARY_CONDITION_OPERATORS.includes(condition.operator);
+  const isList = condition.operator === 'in' || condition.operator === 'not_in';
   const choices = target && CHOICE_TYPES.includes(target.type) ? target.options ?? [] : [];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-2 items-end">
-      <div>
-        <label className={labelClass}>{title} — field</label>
+    <div className="flex items-end gap-2">
+      <div className="flex-1 min-w-0">
         <select
-          value={fieldKey}
-          onChange={(e) => onChange({ fieldKey: e.target.value, value: '' })}
+          aria-label="Condition field"
+          value={condition.field}
+          onChange={(e) => onChange({ field: e.target.value, value: '' })}
           className={inputClass}
         >
-          <option value="">— always —</option>
+          <option value="">— pick a field —</option>
           {targets.map((candidate) => (
             <option key={candidate.key} value={candidate.key}>
               {candidate.label}
@@ -232,11 +247,11 @@ const ConditionRow: React.FC<{
         </select>
       </div>
 
-      <div>
-        <label className={labelClass}>Operator</label>
+      <div className="w-44 flex-shrink-0">
         <select
-          value={operator}
-          disabled={!fieldKey}
+          aria-label="Condition operator"
+          value={condition.operator}
+          disabled={!condition.field}
           onChange={(e) => onChange({ operator: e.target.value as ConditionOperator })}
           className={`${inputClass} disabled:opacity-40`}
         >
@@ -248,14 +263,14 @@ const ConditionRow: React.FC<{
         </select>
       </div>
 
-      <div>
-        <label className={labelClass}>Value</label>
+      <div className="w-40 flex-shrink-0">
         {isUnary ? (
-          <div className="text-[10px] font-mono text-zinc-600 px-1.5 py-2">not required</div>
+          <div className="text-[10px] font-mono text-zinc-600 px-1.5 py-2">no value needed</div>
         ) : choices.length > 0 && !isList ? (
           <select
-            value={value}
-            disabled={!fieldKey}
+            aria-label="Condition value"
+            value={condition.value}
+            disabled={!condition.field}
             onChange={(e) => onChange({ value: e.target.value })}
             className={`${inputClass} disabled:opacity-40`}
           >
@@ -269,17 +284,85 @@ const ConditionRow: React.FC<{
         ) : (
           <input
             type="text"
-            value={value}
-            disabled={!fieldKey}
+            aria-label="Condition value"
+            value={condition.value}
+            disabled={!condition.field}
             onChange={(e) => onChange({ value: e.target.value })}
             placeholder={isList ? 'a, b, c' : 'value to compare'}
             className={`${inputClass} disabled:opacity-40`}
           />
         )}
       </div>
+
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove condition"
+        title="Remove condition"
+        className="text-zinc-500 hover:text-rose-400 p-1.5 flex-shrink-0"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 };
+
+/** A rule = zero or more conditions, combined with all/any. */
+const ConditionGroupEditor: React.FC<{
+  title: string;
+  hint: string;
+  targets: CustomFieldDefinition[];
+  logic: 'all' | 'any';
+  conditions: ConditionDraft[];
+  onLogicChange: (logic: 'all' | 'any') => void;
+  onChange: (index: number, patch: Partial<ConditionDraft>) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+}> = ({ title, hint, targets, logic, conditions, onLogicChange, onChange, onAdd, onRemove }) => (
+  <div className="space-y-1.5">
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[10px] font-mono uppercase text-zinc-400">{title}</span>
+      <div className="flex items-center gap-2">
+        {conditions.length > 1 && (
+          <label className="flex items-center gap-1 text-[10px] font-mono text-zinc-500">
+            match
+            <select
+              aria-label={`${title} — how conditions combine`}
+              value={logic}
+              onChange={(e) => onLogicChange(e.target.value as 'all' | 'any')}
+              className="bg-zinc-900 border border-zinc-800 rounded px-1 py-0.5 text-[10px] text-zinc-200"
+            >
+              <option value="all">all</option>
+              <option value="any">any</option>
+            </select>
+          </label>
+        )}
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={targets.length === 0}
+          className="text-[10px] font-mono text-zinc-400 hover:text-zinc-100 disabled:opacity-40 flex items-center gap-1"
+        >
+          <Plus className="w-3 h-3" /> Add condition
+        </button>
+      </div>
+    </div>
+
+    {conditions.length === 0 ? (
+      <div className="text-[10px] font-mono text-zinc-600 px-1">{hint}</div>
+    ) : (
+      conditions.map((condition, index) => (
+        <ConditionRow
+          key={index}
+          targets={targets}
+          condition={condition}
+          onChange={(patch) => onChange(index, patch)}
+          onRemove={() => onRemove(index)}
+        />
+      ))
+    )}
+  </div>
+);
 
 /**
  * Editor for a ticket type's dynamic form.
@@ -299,6 +382,20 @@ export const CustomFieldBuilder: React.FC<Props> = ({ fields, onChange }) => {
   );
 
   const patch = (next: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...next }));
+
+  const patchCondition = (rule: 'visibleWhen' | 'requiredWhen', index: number, next: Partial<ConditionDraft>) =>
+    setDraft((prev) => ({
+      ...prev,
+      [rule]: prev[rule].map((condition, position) =>
+        position === index ? { ...condition, ...next } : condition,
+      ),
+    }));
+
+  const addCondition = (rule: 'visibleWhen' | 'requiredWhen') =>
+    setDraft((prev) => ({ ...prev, [rule]: [...prev[rule], newCondition()] }));
+
+  const removeCondition = (rule: 'visibleWhen' | 'requiredWhen', index: number) =>
+    setDraft((prev) => ({ ...prev, [rule]: prev[rule].filter((_, position) => position !== index) }));
 
   const resetDraft = () => {
     setDraft(emptyDraft());
@@ -540,7 +637,7 @@ export const CustomFieldBuilder: React.FC<Props> = ({ fields, onChange }) => {
       </label>
 
       {/* Conditional logic */}
-      <div className="p-2 rounded border border-zinc-800 bg-zinc-900/40 space-y-2">
+      <div className="p-2 rounded border border-zinc-800 bg-zinc-900/40 space-y-3">
         <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase text-zinc-500">
           <GitBranch className="w-3 h-3" />
           Conditional logic
@@ -549,34 +646,28 @@ export const CustomFieldBuilder: React.FC<Props> = ({ fields, onChange }) => {
           )}
         </div>
 
-        <ConditionRow
+        <ConditionGroupEditor
           title="Show only when"
+          hint="No rule — always shown."
           targets={targets}
-          fieldKey={draft.visibleField}
-          operator={draft.visibleOperator}
-          value={draft.visibleValue}
-          onChange={(next) =>
-            patch({
-              visibleField: next.fieldKey ?? draft.visibleField,
-              visibleOperator: next.operator ?? draft.visibleOperator,
-              visibleValue: next.value ?? draft.visibleValue,
-            })
-          }
+          logic={draft.visibleLogic}
+          conditions={draft.visibleWhen}
+          onLogicChange={(logic) => patch({ visibleLogic: logic })}
+          onChange={(index, next) => patchCondition('visibleWhen', index, next)}
+          onAdd={() => addCondition('visibleWhen')}
+          onRemove={(index) => removeCondition('visibleWhen', index)}
         />
 
-        <ConditionRow
+        <ConditionGroupEditor
           title="Required only when"
+          hint="No rule — required only if the checkbox above is on."
           targets={targets}
-          fieldKey={draft.requiredField}
-          operator={draft.requiredOperator}
-          value={draft.requiredValue}
-          onChange={(next) =>
-            patch({
-              requiredField: next.fieldKey ?? draft.requiredField,
-              requiredOperator: next.operator ?? draft.requiredOperator,
-              requiredValue: next.value ?? draft.requiredValue,
-            })
-          }
+          logic={draft.requiredLogic}
+          conditions={draft.requiredWhen}
+          onLogicChange={(logic) => patch({ requiredLogic: logic })}
+          onChange={(index, next) => patchCondition('requiredWhen', index, next)}
+          onAdd={() => addCondition('requiredWhen')}
+          onRemove={(index) => removeCondition('requiredWhen', index)}
         />
       </div>
 
@@ -615,8 +706,8 @@ export const CustomFieldBuilder: React.FC<Props> = ({ fields, onChange }) => {
             Configured Fields ({fields.length}):
           </div>
           {fields.map((field, index) => {
-            const condition = field.visible_when?.conditions?.[0];
-            const requiredWhen = field.required_when?.conditions?.[0];
+            const condition = describeGroup(field.visible_when);
+            const requiredWhen = describeGroup(field.required_when);
             return (
               <div
                 key={`${field.key}-${index}`}
@@ -633,13 +724,11 @@ export const CustomFieldBuilder: React.FC<Props> = ({ fields, onChange }) => {
                       </span>
                       {field.required && <span className="text-rose-400 ml-1 font-mono text-[10px]">*req</span>}
                       {condition && (
-                        <span className="text-sky-400 ml-1 font-mono text-[10px]">
-                          if {describeCondition(condition)}
-                        </span>
+                        <span className="text-sky-400 ml-1 font-mono text-[10px]">if {condition}</span>
                       )}
                       {requiredWhen && (
                         <span className="text-amber-400 ml-1 font-mono text-[10px]">
-                          required if {describeCondition(requiredWhen)}
+                          required if {requiredWhen}
                         </span>
                       )}
                     </div>
