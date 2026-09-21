@@ -8,6 +8,7 @@ from app.models.ticket_type import TicketType
 from app.models.faq_item import FaqItem
 from app.models.auth_token import (
     AuthToken,
+    PURPOSE_EMAIL_CHANGE,
     PURPOSE_EMAIL_VERIFICATION,
     PURPOSE_PASSWORD_RESET,
 )
@@ -30,4 +31,5 @@ __all__ = [
     "EmailOutbox",
     "PURPOSE_PASSWORD_RESET",
     "PURPOSE_EMAIL_VERIFICATION",
+    "PURPOSE_EMAIL_CHANGE",
 ]

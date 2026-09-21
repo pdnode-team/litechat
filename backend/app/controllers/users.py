@@ -1,4 +1,6 @@
 from typing import Annotated, List, Optional
+from urllib.parse import urlparse
+
 from litestar import Controller, get, patch, Request
 from litestar.exceptions import (
     NotAuthorizedException,
@@ -12,11 +14,13 @@ from sqlalchemy import select, desc, func, or_
 from app.db.search import LIKE_ESCAPE, like_contains
 from app.services.websocket_hub import hub
 from app.db.session import async_session_factory
+from app.exceptions import FormValidationError
 from app.models.user import User
-from app.schemas.auth import UserResponse
+from app.schemas.auth import ProfileUpdateRequest, UserResponse
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
 from app.services import events as event_bus
+from app.services.form_logic import FieldError
 
 class UpdateRoleRequest(BaseModel):
     role: str  # customer, agent, admin
@@ -92,6 +96,56 @@ class UserController(Controller):
             )
             users = (await session.execute(stmt)).scalars().all()
             return [UserResponse.model_validate(u) for u in users]
+
+    @patch("/me")
+    async def update_me(self, request: Request, data: ProfileUpdateRequest) -> UserResponse:
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise NotAuthorizedException("Authentication required.")
+
+        errors: list[FieldError] = []
+        full_name = data.full_name
+        if full_name is not None:
+            full_name = full_name.strip()
+            if len(full_name) < 2:
+                errors.append(
+                    FieldError("full_name", "Display name must be at least 2 characters.", "Display name", "too_short")
+                )
+            elif len(full_name) > 150:
+                errors.append(
+                    FieldError("full_name", "Display name must be at most 150 characters.", "Display name", "too_long")
+                )
+
+        avatar_url = data.avatar_url
+        if avatar_url is not None:
+            avatar_url = avatar_url.strip()
+            if avatar_url == "":
+                avatar_url = None
+            elif len(avatar_url) > 500:
+                errors.append(
+                    FieldError("avatar_url", "Avatar URL must be at most 500 characters.", "Avatar URL", "too_long")
+                )
+            else:
+                parsed = urlparse(avatar_url)
+                if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                    errors.append(
+                        FieldError("avatar_url", "Avatar URL must be an http or https link.", "Avatar URL", "invalid")
+                    )
+
+        if errors:
+            raise FormValidationError(errors)
+
+        async with async_session_factory() as session:
+            user = await session.get(User, current_user.id)
+            if not user:
+                raise NotAuthorizedException("Authentication required.")
+            if full_name is not None:
+                user.full_name = full_name
+            if data.avatar_url is not None:
+                user.avatar_url = avatar_url
+            await session.commit()
+            await session.refresh(user)
+            return UserResponse.model_validate(user)
 
     @patch("/{user_id:int}/role")
     async def update_user_role(self, request: Request, user_id: Annotated[int, PathParameter()], data: UpdateRoleRequest) -> UserResponse:

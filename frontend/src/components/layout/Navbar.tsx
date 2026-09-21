@@ -6,6 +6,7 @@ import { UserAvatar } from '../common/UserAvatar';
 import { useToast } from '../common/Toast';
 import { apiErrorMessage } from '../../utils/errors';
 import { LogOut, MailWarning, X } from 'lucide-react';
+import { ProfileModal } from './ProfileModal';
 
 interface NavbarProps {
   systemLabel?: string;
@@ -24,6 +25,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { showError } = useToast();
   const { status: realtimeStatus } = useRealtime();
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [resendMessage, setResendMessage] = useState('');
 
@@ -86,15 +88,22 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {user && (
             <div className="flex items-center gap-2.5 pl-3 border-l border-zinc-800/80">
-              <UserAvatar name={user.full_name} size="sm" />
-              <div className="hidden sm:flex flex-col text-left">
-                <span className="text-xs font-medium text-zinc-200 leading-tight">
-                  {user.full_name}
-                </span>
-                <span className="text-[10px] font-mono text-zinc-500 uppercase leading-none">
-                  {user.role}
-                </span>
-              </div>
+              <button
+                type="button"
+                onClick={() => setProfileOpen(true)}
+                className="flex items-center gap-2.5 rounded-md hover:bg-zinc-800/60 px-1 py-0.5 transition"
+                title="Open profile"
+              >
+                <UserAvatar name={user.full_name} src={user.avatar_url} size="sm" />
+                <div className="hidden sm:flex flex-col text-left">
+                  <span className="text-xs font-medium text-zinc-200 leading-tight">
+                    {user.full_name}
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-500 uppercase leading-none">
+                    {user.role}
+                  </span>
+                </div>
+              </button>
 
               <button
                 type="button"
@@ -109,6 +118,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
         </div>
       </header>
+      <ProfileModal isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
 
       {showVerifyBanner && (
         <div

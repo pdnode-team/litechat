@@ -18,3 +18,5 @@ class User(Base, TimestampMixin):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Bumped on password change/reset and deactivation so outstanding JWTs die.
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Set while an email-change token is outstanding; applied on confirmation.
+    pending_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

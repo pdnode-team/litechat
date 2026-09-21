@@ -20,7 +20,7 @@ const RootContent: React.FC = () => {
     hasRecoveryToken() ? takeRecoveryTokens() : null,
   );
 
-  if (recovery?.reset || recovery?.verify) {
+  if (recovery?.reset || recovery?.verify || recovery?.emailChange) {
     return <PasswordRecoveryGate tokens={recovery} />;
   }
 

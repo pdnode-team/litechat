@@ -3,10 +3,10 @@ import { ArrowRight, CheckCircle2, KeyRound, Lock, MailCheck, ShieldAlert } from
 import { authApi } from '../../api/client';
 import { apiErrorMessage } from '../../utils/errors';
 
-export type RecoveryTokens = { reset: string | null; verify: string | null };
+export type RecoveryTokens = { reset: string | null; verify: string | null; emailChange: string | null };
 
 /** Reads a one-time token from the URL and then strips it from the address bar. */
-const takeToken = (key: 'reset_token' | 'verify_token'): string | null => {
+const takeToken = (key: 'reset_token' | 'verify_token' | 'email_change_token'): string | null => {
   const params = new URLSearchParams(window.location.search);
   const token = params.get(key);
   if (!token) return null;
@@ -20,6 +20,7 @@ const takeToken = (key: 'reset_token' | 'verify_token'): string | null => {
 export const takeRecoveryTokens = (): RecoveryTokens => ({
   reset: takeToken('reset_token'),
   verify: takeToken('verify_token'),
+  emailChange: takeToken('email_change_token'),
 });
 
 export const ResetPasswordView: React.FC<{
@@ -100,17 +101,19 @@ export const ResetPasswordView: React.FC<{
   );
 };
 
-export const VerifyEmailView: React.FC<{ token: string; onDone: () => void }> = ({
-  token,
-  onDone,
-}) => {
+export const VerifyEmailView: React.FC<{
+  token: string;
+  onDone: () => void;
+  mode?: 'verify' | 'email-change';
+}> = ({ token, onDone, mode = 'verify' }) => {
   const [state, setState] = useState<'working' | 'ok' | 'failed'>('working');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    authApi
-      .verifyEmail(token)
+    const request =
+      mode === 'email-change' ? authApi.verifyEmailChange(token) : authApi.verifyEmail(token);
+    request
       .then(() => {
         if (!cancelled) setState('ok');
       })
@@ -122,7 +125,7 @@ export const VerifyEmailView: React.FC<{ token: string; onDone: () => void }> = 
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, mode]);
 
   return (
     <Shell icon={<MailCheck className="w-4 h-4 text-emerald-400" />} title="Email confirmation">
@@ -132,7 +135,11 @@ export const VerifyEmailView: React.FC<{ token: string; onDone: () => void }> = 
       {state === 'ok' && (
         <Result
           tone="ok"
-          message="Your email address is confirmed."
+          message={
+            mode === 'email-change'
+              ? 'Your email address has been updated.'
+              : 'Your email address is confirmed.'
+          }
           actionLabel="Continue to sign in"
           onAction={onDone}
         />
@@ -148,13 +155,16 @@ export const VerifyEmailView: React.FC<{ token: string; onDone: () => void }> = 
 export const PasswordRecoveryGate: React.FC<{ tokens: RecoveryTokens }> = ({ tokens }) => {
   if (tokens.reset) return <ResetPasswordView token={tokens.reset} onDone={() => window.location.reload()} />;
   if (tokens.verify) return <VerifyEmailView token={tokens.verify} onDone={() => window.location.reload()} />;
+  if (tokens.emailChange) {
+    return <VerifyEmailView token={tokens.emailChange} onDone={() => window.location.reload()} mode="email-change" />;
+  }
   return null;
 };
 
 /** True when the URL carries a recovery token, i.e. the gate should take over. */
 export const hasRecoveryToken = (): boolean => {
   const params = new URLSearchParams(window.location.search);
-  return params.has('reset_token') || params.has('verify_token');
+  return params.has('reset_token') || params.has('verify_token') || params.has('email_change_token');
 };
 
 const inputClass =

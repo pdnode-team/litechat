@@ -62,6 +62,17 @@ class ChangePasswordRequest(BaseModel):
     def check_password(cls, v: str) -> str:
         return validate_password_strength(v)
 
+class ProfileUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+class ChangeEmailRequest(BaseModel):
+    password: str
+    new_email: EmailStr
+
+class VerifyEmailChangeRequest(BaseModel):
+    token: str = Field(min_length=10)
+
 class UserResponse(BaseModel):
     id: int
     email: str
@@ -76,6 +87,12 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+    user: UserResponse
+
+class ChangePasswordResponse(BaseModel):
+    detail: str
     access_token: str
     token_type: str = "Bearer"
     user: UserResponse

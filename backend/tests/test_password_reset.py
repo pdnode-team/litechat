@@ -183,6 +183,9 @@ async def test_change_password_requires_the_current_one(captured_mail):
             headers=headers,
         )
         assert ok.status_code in (200, 201)
+        body = ok.json()
+        assert body["access_token"]
+        fresh = {"Authorization": f"Bearer {body['access_token']}"}
 
         assert (
             await client.post(
@@ -191,6 +194,7 @@ async def test_change_password_requires_the_current_one(captured_mail):
         ).status_code in (200, 201)
 
         assert (await client.get("/api/auth/me", headers=headers)).status_code == 401
+        assert (await client.get("/api/auth/me", headers=fresh)).status_code == 200
 
 
 @pytest.mark.asyncio

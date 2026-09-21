@@ -120,6 +120,33 @@ async def send_password_reset_email(to: str, raw_token: str) -> None:
     )
 
 
+async def send_email_change_verification(to: str, raw_token: str) -> None:
+    link = f"{await _app_url()}/?email_change_token={raw_token}"
+    await send_email(
+        to,
+        "Confirm your new LiteChat email address",
+        (
+            "A request was made to use this address for a LiteChat account.\n\n"
+            f"Confirm the change by opening this link:\n{link}\n\n"
+            "If you did not request this, you can ignore this email."
+        ),
+        kind="email_change",
+    )
+
+
+async def send_email_change_notice(to: str, new_email: str) -> None:
+    await send_email(
+        to,
+        "Your LiteChat email address is being changed",
+        (
+            f"Someone (hopefully you) asked to change this account's email to {new_email}.\n\n"
+            "If this was you, confirm the change from the message sent to the new address.\n"
+            "If this was not you, sign in and change your password immediately."
+        ),
+        kind="email_change_notice",
+    )
+
+
 async def send_email_verification_email(to: str, raw_token: str) -> None:
     link = f"{await _app_url()}/?verify_token={raw_token}"
     await send_email(

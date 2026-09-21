@@ -7,10 +7,16 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.errors import is_unique_violation
 from app.db.session import async_session_factory, engine
-from app.models.auth_token import PURPOSE_EMAIL_VERIFICATION, PURPOSE_PASSWORD_RESET
+from app.models.auth_token import (
+    PURPOSE_EMAIL_CHANGE,
+    PURPOSE_EMAIL_VERIFICATION,
+    PURPOSE_PASSWORD_RESET,
+)
 from app.models.user import User
 from app.schemas.auth import (
+    ChangeEmailRequest,
     ChangePasswordRequest,
+    ChangePasswordResponse,
     ForgotPasswordRequest,
     LoginRequest,
     RegisterRequest,
@@ -18,6 +24,7 @@ from app.schemas.auth import (
     SetupAdminRequest,
     TokenResponse,
     UserResponse,
+    VerifyEmailChangeRequest,
     VerifyEmailRequest,
 )
 from app.services.auth_service import (
@@ -29,6 +36,8 @@ from app.services.auth_service import (
     verify_password,
 )
 from app.services.email_service import (
+    send_email_change_notice,
+    send_email_change_verification,
     send_email_verification_email,
     send_password_reset_email,
 )
@@ -275,7 +284,7 @@ class AuthController(Controller):
         return {"detail": "Verification email sent."}
 
     @post("/change-password")
-    async def change_password(self, request: Request, data: ChangePasswordRequest) -> dict:
+    async def change_password(self, request: Request, data: ChangePasswordRequest) -> ChangePasswordResponse:
         user = await get_current_user_from_request(request)
         if not user:
             raise NotAuthorizedException("Authentication required.")
@@ -290,8 +299,71 @@ class AuthController(Controller):
             db_user.hashed_password = hash_password(data.new_password)
             await revoke_user_sessions(session, db_user)
             await session.commit()
+            await session.refresh(db_user)
+            token = _issue_access_token(db_user)
+            return ChangePasswordResponse(
+                detail="Password changed.",
+                access_token=token,
+                user=UserResponse.model_validate(db_user),
+            )
 
-        return {"detail": "Password changed."}
+    @post("/change-email")
+    async def change_email(self, request: Request, data: ChangeEmailRequest) -> dict:
+        user = await get_current_user_from_request(request)
+        if not user:
+            raise NotAuthorizedException("Authentication required.")
+        if not verify_password(data.password, user.hashed_password):
+            raise ValidationException("Your current password is incorrect.")
+
+        new_email = data.new_email.strip().lower()
+        if new_email == user.email.lower():
+            raise ValidationException("That is already your email address.")
+
+        async with async_session_factory() as session:
+            taken = (
+                await session.execute(select(User).where(User.email == new_email))
+            ).scalar_one_or_none()
+            if taken is not None:
+                raise ValidationException("That email address is already in use.")
+
+            db_user = await session.get(User, user.id)
+            if not db_user:
+                raise NotAuthorizedException("Authentication required.")
+            db_user.pending_email = new_email
+            raw_token = await issue_token(session, db_user.id, PURPOSE_EMAIL_CHANGE)
+            old_email = db_user.email
+
+        await send_email_change_verification(new_email, raw_token)
+        await send_email_change_notice(old_email, new_email)
+        return {"detail": "Check the new address for a confirmation link."}
+
+    @post("/verify-email-change")
+    async def verify_email_change(self, data: VerifyEmailChangeRequest) -> dict:
+        async with async_session_factory() as session:
+            token = await consume_token(session, data.token, PURPOSE_EMAIL_CHANGE)
+            if token is None:
+                raise ValidationException("This confirmation link is invalid or has expired.")
+
+            user = await session.get(User, token.user_id)
+            if not user or not user.pending_email:
+                raise ValidationException("This confirmation link is invalid or has expired.")
+
+            taken = (
+                await session.execute(
+                    select(User).where(User.email == user.pending_email, User.id != user.id)
+                )
+            ).scalar_one_or_none()
+            if taken is not None:
+                user.pending_email = None
+                await session.commit()
+                raise ValidationException("That email address is already in use.")
+
+            user.email = user.pending_email
+            user.email_verified = True
+            user.pending_email = None
+            await session.commit()
+
+        return {"detail": "Email address updated."}
 
     @post("/logout", status_code=204)
     async def logout(self, request: Request) -> None:

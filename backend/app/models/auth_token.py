@@ -9,6 +9,7 @@ from app.db.base import Base, UTCDateTime, utcnow
 # Token purposes
 PURPOSE_PASSWORD_RESET = "password_reset"
 PURPOSE_EMAIL_VERIFICATION = "email_verification"
+PURPOSE_EMAIL_CHANGE = "email_change"
 
 
 class AuthToken(Base):

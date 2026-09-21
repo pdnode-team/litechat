@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import PASSWORD_RESET_TTL_MINUTES, EMAIL_VERIFICATION_TTL_MINUTES
 from app.db.base import utcnow
 from app.models.auth_token import (
+    PURPOSE_EMAIL_CHANGE,
     PURPOSE_EMAIL_VERIFICATION,
     PURPOSE_PASSWORD_RESET,
     AuthToken,
@@ -18,6 +19,7 @@ from app.models.auth_token import (
 TTL_BY_PURPOSE = {
     PURPOSE_PASSWORD_RESET: PASSWORD_RESET_TTL_MINUTES,
     PURPOSE_EMAIL_VERIFICATION: EMAIL_VERIFICATION_TTL_MINUTES,
+    PURPOSE_EMAIL_CHANGE: EMAIL_VERIFICATION_TTL_MINUTES,
 }
 
 

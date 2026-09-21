@@ -154,10 +154,18 @@ export const authApi = {
     return res.data;
   },
   changePassword: async (current_password: string, new_password: string) => {
-    const res = await api.post<{ detail: string }>('/auth/change-password', {
-      current_password,
-      new_password,
-    });
+    const res = await api.post<{ detail: string; access_token: string; user: User }>(
+      '/auth/change-password',
+      { current_password, new_password },
+    );
+    return res.data;
+  },
+  changeEmail: async (password: string, new_email: string) => {
+    const res = await api.post<{ detail: string }>('/auth/change-email', { password, new_email });
+    return res.data;
+  },
+  verifyEmailChange: async (token: string) => {
+    const res = await api.post<{ detail: string }>('/auth/verify-email-change', { token });
     return res.data;
   },
   createWsTicket: async () => {
@@ -170,6 +178,10 @@ export const authApi = {
 };
 
 export const usersApi = {
+  updateMe: async (data: { full_name?: string; avatar_url?: string }) => {
+    const res = await api.patch<User>('/users/me', data);
+    return res.data;
+  },
   list: async (
     params?: { role?: string; search?: string } & PageParams
   ): Promise<Page<User>> => {

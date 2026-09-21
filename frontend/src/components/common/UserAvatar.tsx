@@ -2,11 +2,12 @@ import React from 'react';
 
 interface Props {
   name: string;
+  src?: string | null;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }
 
-export const UserAvatar: React.FC<Props> = ({ name, size = 'md', className = '' }) => {
+export const UserAvatar: React.FC<Props> = ({ name, src, size = 'md', className = '' }) => {
   const getInitials = (str: string) => {
     if (!str) return '?';
     const parts = str.trim().split(/\s+/);
@@ -22,7 +23,16 @@ export const UserAvatar: React.FC<Props> = ({ name, size = 'md', className = '' 
     lg: 'w-10 h-10 text-sm',
   }[size];
 
-  // Deterministic neutral zinc background
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        className={`rounded-md object-cover border border-zinc-700/60 shadow-sm flex-shrink-0 ${sizeClasses} ${className}`}
+      />
+    );
+  }
+
   return (
     <div
       className={`rounded-md bg-zinc-800 text-zinc-100 font-semibold flex items-center justify-center select-none border border-zinc-700/60 shadow-sm flex-shrink-0 ${sizeClasses} ${className}`}

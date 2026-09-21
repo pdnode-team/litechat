@@ -91,6 +91,8 @@ RATE_LIMIT_RULES = {
     "/api/auth/verify-email": _rate_rule(int(os.getenv("RATE_LIMIT_VERIFY_EMAIL", "20")), 600),
     "/api/auth/ws-ticket": _rate_rule(int(os.getenv("RATE_LIMIT_WS_TICKET", "30")), 60),
     "/api/auth/logout": _rate_rule(int(os.getenv("RATE_LIMIT_LOGOUT", "20")), 60),
+    "/api/auth/change-email": _rate_rule(int(os.getenv("RATE_LIMIT_CHANGE_EMAIL", "5")), 600),
+    "/api/auth/verify-email-change": _rate_rule(int(os.getenv("RATE_LIMIT_VERIFY_EMAIL_CHANGE", "20")), 600),
     "/api/upload": _rate_rule(int(os.getenv("RATE_LIMIT_UPLOAD", "20")), 60),
 }
 
