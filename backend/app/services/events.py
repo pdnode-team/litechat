@@ -74,6 +74,19 @@ async def publish(event: Event) -> None:
         ticket_data=ticket_data,
     )
 
+    if event.user_ids:
+        from app.services import inbox
+
+        try:
+            await inbox.persist_for_users(
+                event.user_ids,
+                event_type=event.type,
+                notification=event.notification,
+                ticket_id=event.ticket_id,
+            )
+        except Exception:
+            logger.exception("Failed to persist inbox notifications for %s", event.type)
+
     if event.email_kind:
         await notification_service.handle(event.email_kind, event.context)
 

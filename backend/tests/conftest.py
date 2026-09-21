@@ -11,6 +11,7 @@ os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-pytest-execution-only-12345"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 # Drive the outbox from tests instead of a background loop.
 os.environ["EMAIL_OUTBOX_WORKER"] = "false"
+os.environ["SLA_WATCH_WORKER"] = "false"
 
 from litestar.testing import AsyncTestClient  # noqa: E402
 from app.main import app  # noqa: E402

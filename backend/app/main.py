@@ -20,6 +20,7 @@ from app.config import (  # noqa: E402
     ENABLE_API_DOCS,
     HEALTH_DB_TIMEOUT_SECONDS,
     IS_PRODUCTION,
+    SLA_WATCH_WORKER,
 )
 from app.controllers.analytics import AnalyticsController  # noqa: E402
 from app.controllers.auth import AuthController  # noqa: E402
@@ -28,6 +29,7 @@ from app.controllers.csat import CSATController  # noqa: E402
 from app.controllers.faq import FaqController  # noqa: E402
 from app.controllers.managed_apps import ManagedAppController  # noqa: E402
 from app.controllers.messages import FileController, MessageController, UploadController  # noqa: E402
+from app.controllers.notifications import NotificationController  # noqa: E402
 from app.controllers.settings import SettingsController  # noqa: E402
 from app.controllers.ticket_types import TicketTypeController  # noqa: E402
 from app.controllers.tickets import TicketController  # noqa: E402
@@ -39,16 +41,18 @@ from app.controllers.websocket import (  # noqa: E402
 from app.db.seed import seed_initial_data  # noqa: E402
 from app.db.session import async_session_factory, init_db  # noqa: E402
 from app.services.email_outbox import worker_loop  # noqa: E402
+from app.services.sla_watch import worker_loop as sla_watch_loop  # noqa: E402
 from app.exception_handlers import EXCEPTION_HANDLERS  # noqa: E402
 from app.middleware import RateLimitMiddleware, RequestContextMiddleware  # noqa: E402
 
 logger = logging.getLogger("litechat")
 
 _outbox_task: asyncio.Task | None = None
+_sla_task: asyncio.Task | None = None
 
 
 async def on_app_startup() -> None:
-    global _outbox_task
+    global _outbox_task, _sla_task
     logger.info("Initializing database schemas...")
     await init_db()
     if os.getenv("ADMIN_EMAIL") and os.getenv("ADMIN_PASSWORD"):
@@ -57,20 +61,25 @@ async def on_app_startup() -> None:
     if EMAIL_OUTBOX_WORKER:
         _outbox_task = asyncio.create_task(worker_loop())
         logger.info("Email outbox worker started")
+    if SLA_WATCH_WORKER:
+        _sla_task = asyncio.create_task(sla_watch_loop())
+        logger.info("SLA watch worker started")
     if IS_PRODUCTION:
         logger.info("Environment: production")
     logger.info("LiteChat backend ready!")
 
 
 async def on_app_shutdown() -> None:
-    global _outbox_task
-    if _outbox_task is not None:
-        _outbox_task.cancel()
-        try:
-            await _outbox_task
-        except (asyncio.CancelledError, Exception):
-            pass
-        _outbox_task = None
+    global _outbox_task, _sla_task
+    for task in (_outbox_task, _sla_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+    _outbox_task = None
+    _sla_task = None
 
 
 allowed_origins_raw = os.getenv(
@@ -135,6 +144,7 @@ app = Litestar(
         TicketTypeController,
         FaqController,
         SettingsController,
+        NotificationController,
         ticket_websocket_handler,
         notifications_websocket_handler,
         FileController,

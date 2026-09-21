@@ -18,6 +18,7 @@ import {
   EmailSettingsUpdate,
   NotificationSettingsUpdate,
   SlaSettingsUpdate,
+  InboxItem,
 } from '../types';
 import { API_BASE_URL } from './config';
 
@@ -175,6 +176,17 @@ export const authApi = {
   },
   logout: async () => {
     await api.post('/auth/logout');
+  },
+};
+
+export const inboxApi = {
+  list: async (params?: PageParams): Promise<Page<InboxItem>> => {
+    const res = await api.get<Page<InboxItem>>('/notifications', { params });
+    return res.data;
+  },
+  markRead: async (body: { ids?: number[]; all?: boolean }): Promise<{ updated: number }> => {
+    const res = await api.post<{ updated: number }>('/notifications/read', body);
+    return res.data;
   },
 };
 

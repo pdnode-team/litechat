@@ -15,6 +15,7 @@ from app.models.auth_token import (
 from app.models.app_setting import AppSetting
 from app.models.file_upload import FileUpload
 from app.models.email_outbox import EmailOutbox
+from app.models.notification import Notification
 
 __all__ = [
     "User",
@@ -29,6 +30,7 @@ __all__ = [
     "AppSetting",
     "FileUpload",
     "EmailOutbox",
+    "Notification",
     "PURPOSE_PASSWORD_RESET",
     "PURPOSE_EMAIL_VERIFICATION",
     "PURPOSE_EMAIL_CHANGE",

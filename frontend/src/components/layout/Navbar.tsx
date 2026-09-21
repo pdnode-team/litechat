@@ -7,6 +7,7 @@ import { useToast } from '../common/Toast';
 import { apiErrorMessage } from '../../utils/errors';
 import { LogOut, MailWarning, X } from 'lucide-react';
 import { ProfileModal } from './ProfileModal';
+import { InboxBell } from './InboxBell';
 
 interface NavbarProps {
   systemLabel?: string;
@@ -85,6 +86,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Right User & Actions */}
         <div className="flex items-center gap-3">
           {rightActions}
+          {user && <InboxBell />}
 
           {user && (
             <div className="flex items-center gap-2.5 pl-3 border-l border-zinc-800/80">

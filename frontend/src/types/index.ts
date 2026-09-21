@@ -96,6 +96,16 @@ export type SlaSettingsUpdate = Partial<
   >
 >;
 
+export interface InboxItem {
+  id: number;
+  type: string;
+  title: string;
+  body: string;
+  ticket_id?: number | null;
+  read_at?: string | null;
+  created_at: string;
+}
+
 export interface User {
   id: number;
   email: string;

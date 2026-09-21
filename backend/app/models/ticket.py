@@ -35,5 +35,7 @@ class Ticket(Base, TimestampMixin):
     first_responded_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
-    
+    sla_first_alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    sla_resolution_alerted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
     tags: Mapped[Optional[str]] = mapped_column(String(500), default="", nullable=True)

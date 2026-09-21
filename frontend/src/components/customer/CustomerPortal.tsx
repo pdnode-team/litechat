@@ -26,6 +26,7 @@ import { apiErrorMessage } from '../../utils/errors';
 import { mergeMessage } from '../../utils/messages';
 import { useToast } from '../common/Toast';
 import { useRealtimeEvent } from '../../context/RealtimeContext';
+import { setTicketOpener } from '../../utils/ticketNav';
 
 /** Rows fetched per "load more" step. */
 const PAGE_SIZE = 25;
@@ -47,6 +48,19 @@ export const CustomerPortal: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  useEffect(() => {
+    setTicketOpener((ticketId) => {
+      void ticketsApi
+        .get(ticketId)
+        .then((ticket) => {
+          setSelectedTicket(ticket);
+          setTickets((prev) => (prev.some((item) => item.id === ticket.id) ? prev : [ticket, ...prev]));
+        })
+        .catch((err) => showError(apiErrorMessage(err, 'Could not open that ticket.')));
+    });
+    return () => setTicketOpener(null);
+  }, [showError]);
 
   const [isFaqOpen, setIsFaqOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);

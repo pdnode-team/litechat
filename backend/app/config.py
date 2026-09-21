@@ -121,4 +121,5 @@ HEALTH_DB_TIMEOUT_SECONDS = float(os.getenv("HEALTH_DB_TIMEOUT_SECONDS", "2"))
 # themselves; production leaves it on. Replicas > 1 can still double-send.
 EMAIL_OUTBOX_WORKER = _env_flag("EMAIL_OUTBOX_WORKER", default=True)
 EMAIL_OUTBOX_MAX_ATTEMPTS = int(os.getenv("EMAIL_OUTBOX_MAX_ATTEMPTS", "5"))
+SLA_WATCH_WORKER = _env_flag("SLA_WATCH_WORKER", default=True)
 

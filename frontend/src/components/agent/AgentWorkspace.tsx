@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { formatUtc } from '../../utils/datetime';
 import { apiErrorMessage } from '../../utils/errors';
+import { setTicketOpener } from '../../utils/ticketNav';
 import { mergeMessage } from '../../utils/messages';
 import { useToast } from '../common/Toast';
 import { useRealtimeEvent } from '../../context/RealtimeContext';
@@ -157,6 +158,19 @@ export const AgentWorkspace: React.FC = () => {
   const [agentsList, setAgentsList] = useState<User[]>([]);
   const [editing, setEditing] = useState(false);
   const { showSuccess, showError } = useToast();
+
+  useEffect(() => {
+    setTicketOpener((ticketId) => {
+      void ticketsApi
+        .get(ticketId)
+        .then((ticket) => {
+          setSelectedTicket(ticket);
+          setTickets((prev) => (prev.some((item) => item.id === ticket.id) ? prev : [ticket, ...prev]));
+        })
+        .catch((err) => showError(apiErrorMessage(err, 'Could not open that ticket.')));
+    });
+    return () => setTicketOpener(null);
+  }, [showError]);
 
   const wsClientRef = useRef<TicketWebSocketClient | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
