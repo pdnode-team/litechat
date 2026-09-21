@@ -193,3 +193,7 @@ class CannedResponseController(Controller):
         await event_bus.publish_catalog_change(
             "canned_responses", "deleted", actor_name=current_user.full_name
         )
+        from app.services import audit as audit_service
+        await audit_service.record(
+            actor=current_user, action="canned_response.deleted", entity_type="canned_response", entity_id=response_id
+        )

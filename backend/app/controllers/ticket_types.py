@@ -241,3 +241,7 @@ class TicketTypeController(Controller):
                 ) from None
 
             await event_bus.publish_catalog_change("ticket_types", "deleted", actor_name=current_user.full_name)
+            from app.services import audit as audit_service
+            await audit_service.record(
+                actor=current_user, action="ticket_type.deleted", entity_type="ticket_type", entity_id=type_id
+            )

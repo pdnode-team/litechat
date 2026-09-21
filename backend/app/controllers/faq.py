@@ -270,3 +270,7 @@ class FaqController(Controller):
             await session.commit()
 
         await event_bus.publish_catalog_change("faq", "deleted", actor_name=current_user.full_name)
+        from app.services import audit as audit_service
+        await audit_service.record(
+            actor=current_user, action="faq.deleted", entity_type="faq", entity_id=faq_id
+        )

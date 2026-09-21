@@ -16,7 +16,7 @@ from app.schemas.settings import (
     TestEmailRequest,
     TestEmailResult,
 )
-from app.services import email_service, settings_service
+from app.services import audit, email_service, settings_service
 
 
 class SettingsController(Controller):
@@ -39,8 +39,16 @@ class SettingsController(Controller):
 
     @put("/email")
     async def update_email_settings(self, request: Request, data: EmailSettingsUpdate) -> Dict[str, Any]:
-        await self._require_admin(request)
-        await settings_service.set_many(data.model_dump(exclude_unset=True))
+        actor = await self._require_admin(request)
+        payload = data.model_dump(exclude_unset=True)
+        await settings_service.set_many(payload)
+        await audit.record(
+            actor=actor,
+            action="settings.email_updated",
+            entity_type="settings",
+            entity_id="email",
+            after=payload,
+        )
         return settings_service.public_view(await settings_service.get_all())
 
     @put("/notifications")

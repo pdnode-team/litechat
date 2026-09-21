@@ -20,6 +20,7 @@ from app.schemas.auth import ProfileUpdateRequest, UserResponse
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
 from app.controllers.auth import get_current_user_from_request
 from app.services import events as event_bus
+from app.services import audit
 from app.services.form_logic import FieldError
 
 class UpdateRoleRequest(BaseModel):
@@ -167,9 +168,18 @@ class UserController(Controller):
             if user.id == current_user.id and data.role != "admin":
                 raise ValidationException("Cannot demote your own admin account.")
 
+            before_role = user.role
             user.role = data.role
             await session.commit()
             await session.refresh(user)
+            await audit.record(
+                actor=current_user,
+                action="user.role_changed",
+                entity_type="user",
+                entity_id=user.id,
+                before={"role": before_role},
+                after={"role": user.role},
+            )
 
             await event_bus.publish_user_change(
                 user.id,
@@ -195,6 +205,7 @@ class UserController(Controller):
             if user.id == current_user.id and not data.is_active:
                 raise ValidationException("Cannot deactivate your own account.")
 
+            before_active = user.is_active
             user.is_active = data.is_active
             if not data.is_active:
                 user.token_version = (user.token_version or 0) + 1
@@ -202,6 +213,14 @@ class UserController(Controller):
             await session.refresh(user)
             if not data.is_active:
                 await hub.disconnect_user(user.id)
+            await audit.record(
+                actor=current_user,
+                action="user.status_changed",
+                entity_type="user",
+                entity_id=user.id,
+                before={"is_active": before_active},
+                after={"is_active": user.is_active},
+            )
 
             await event_bus.publish_user_change(
                 user.id,

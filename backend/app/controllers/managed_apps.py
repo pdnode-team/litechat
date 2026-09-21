@@ -282,3 +282,7 @@ class ManagedAppController(Controller):
                 ) from None
 
             await event_bus.publish_catalog_change("apps", "deleted", actor_name=current_user.full_name)
+            from app.services import audit as audit_service
+            await audit_service.record(
+                actor=current_user, action="app.deleted", entity_type="managed_app", entity_id=app_id
+            )

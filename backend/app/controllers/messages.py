@@ -395,6 +395,25 @@ class FileController(Controller):
             media_type = media_type or "application/octet-stream"
         disposition = "inline" if ext in IMAGE_EXTENSIONS else "attachment"
 
+        from app.services import audit as audit_service
+
+        ticket_id = None
+        async with async_session_factory() as session:
+            msg = (
+                await session.execute(
+                    select(Message.id, Message.ticket_id).where(Message.attachments_json.contains(stored_name)).limit(1)
+                )
+            ).first()
+            if msg is not None:
+                ticket_id = msg.ticket_id
+        await audit_service.record(
+            actor=current_user,
+            action="file.downloaded",
+            entity_type="file",
+            entity_id=stored_name,
+            meta={"ticket_id": ticket_id},
+        )
+
         return File(
             path=dest,
             filename=download_name,

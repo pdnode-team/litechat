@@ -16,6 +16,7 @@ from app.models.app_setting import AppSetting
 from app.models.file_upload import FileUpload
 from app.models.email_outbox import EmailOutbox
 from app.models.notification import Notification
+from app.models.audit_log import AuditLog
 
 __all__ = [
     "User",
@@ -31,6 +32,7 @@ __all__ = [
     "FileUpload",
     "EmailOutbox",
     "Notification",
+    "AuditLog",
     "PURPOSE_PASSWORD_RESET",
     "PURPOSE_EMAIL_VERIFICATION",
     "PURPOSE_EMAIL_CHANGE",

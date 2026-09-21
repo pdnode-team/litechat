@@ -23,6 +23,7 @@ from app.config import (  # noqa: E402
     SLA_WATCH_WORKER,
 )
 from app.controllers.analytics import AnalyticsController  # noqa: E402
+from app.controllers.audit import AuditLogController  # noqa: E402
 from app.controllers.auth import AuthController  # noqa: E402
 from app.controllers.canned_responses import CannedResponseController  # noqa: E402
 from app.controllers.csat import CSATController  # noqa: E402
@@ -145,6 +146,7 @@ app = Litestar(
         FaqController,
         SettingsController,
         NotificationController,
+        AuditLogController,
         ticket_websocket_handler,
         notifications_websocket_handler,
         FileController,

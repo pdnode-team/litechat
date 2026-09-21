@@ -52,6 +52,7 @@ from app.services.form_logic import (
 )
 from app.services.sla_service import calculate_sla_deadlines, get_sla_status
 from app.services import events as event_bus
+from app.services import audit
 from app.services import notification_service
 from app.services.events import Event, TICKET_CREATED, TICKET_UPDATED
 
@@ -666,6 +667,14 @@ class TicketController(Controller):
                 context={"actor_email": current_user.email},
                 system_message=message_to_response(sys_msg),
             )
+            await audit.record(
+                actor=current_user,
+                action="ticket.status_changed",
+                entity_type="ticket",
+                entity_id=ticket.id,
+                before={"status": old_status},
+                after={"status": ticket.status},
+            )
             return resp
 
     @patch("/{ticket_id:int}/assign")
@@ -681,6 +690,7 @@ class TicketController(Controller):
             if not ticket:
                 raise NotFoundException("Ticket not found.")
 
+            previous_assignee = ticket.assigned_agent_id
             target_agent = None
             if data.agent_id:
                 target_agent = await session.get(User, data.agent_id)
@@ -726,6 +736,14 @@ class TicketController(Controller):
                 actor_name=current_user.full_name,
                 context={"actor_email": current_user.email},
                 system_message=message_to_response(sys_msg),
+            )
+            await audit.record(
+                actor=current_user,
+                action="ticket.assigned",
+                entity_type="ticket",
+                entity_id=ticket.id,
+                before={"assigned_agent_id": previous_assignee},
+                after={"assigned_agent_id": ticket.assigned_agent_id},
             )
             return resp
 
@@ -783,5 +801,13 @@ class TicketController(Controller):
                 actor_name=current_user.full_name,
                 context={"actor_email": current_user.email},
                 system_message=message_to_response(sys_msg),
+            )
+            await audit.record(
+                actor=current_user,
+                action="ticket.priority_changed",
+                entity_type="ticket",
+                entity_id=ticket.id,
+                before={"priority": old_priority},
+                after={"priority": ticket.priority},
             )
             return resp
