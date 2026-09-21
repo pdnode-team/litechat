@@ -1,32 +1,37 @@
-# React + TypeScript + Vite
+# LiteChat frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Tailwind CSS SPA for the LiteChat support desk. Talks to
+the Litestar API over JSON; in production it is served as a static site and
+calls same-origin `/api` and `/ws`.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+cd frontend
+pnpm install
+pnpm dev          # http://127.0.0.1:3000, proxies /api and /ws to :8000
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The Vite proxy target defaults to `http://127.0.0.1:8000`. Override with
+`DEV_API_TARGET`. `VITE_API_BASE_URL` is only needed when the API is on a
+different origin (then also set `ALLOWED_ORIGINS` on the backend). Same-origin
+deploys leave it unset.
+
+```bash
+pnpm build        # tsc -b && vite build → dist/
+pnpm lint         # oxlint
+pnpm test         # vitest (formLogic mirror of the server rules)
+```
+
+## Layout
+
+```
+src/
+  api/            # HTTP + WebSocket clients
+  components/     # admin / agent / customer / auth / chat
+  context/        # AuthContext, RealtimeContext
+  types/          # shared TypeScript types
+  utils/          # datetime, errors, formLogic (mirrors backend form_logic.py)
+```
+
+Node 24 is required (see `nixpacks.toml`): Vite 8's bundler needs `>=22.12`.

@@ -323,15 +323,14 @@ available to agents.
 
 - **Timestamps are stored as UTC but serialized without a timezone offset.** Clients must
   interpret them as UTC (the frontend does this in `src/utils/datetime.ts`).
-- **No token revocation.** Password reset and logout do not invalidate already-issued
-  JWTs; they stay valid until they expire.
-- **The rate limiter is per process.** Multiple workers need a shared store.
-- **Realtime is per process.** The WebSocket hub keeps connections in memory, so
-  running more than one worker means a client only receives events published by the
-  worker it is connected to; a shared pub/sub (e.g. Redis) is required to fan out
-  across workers.
-- **The email outbox worker is per process.** Replicas greater than 1 can
-  double-send the same row; keep replicas at 1.
-- No refresh tokens, no email change flow, no audit log.
+- **The rate limiter, WebSocket hub and email outbox worker are per process.**
+  Replicas greater than 1 split live events, under-count rate limits, and can
+  double-send mail. Keep replicas at 1, or move those three onto shared storage.
+- **No refresh tokens.** Access tokens last 7 days; logout / password change /
+  deactivation bump `token_version` so outstanding JWTs die, but there is no
+  sliding session.
+- **No email-change flow and no audit log yet.**
 - **Custom fields are not searchable.** `custom_fields_json` is plain JSON text, so only
-  title, description and ticket code are matched by `search=`.
+  title, description and ticket code are matched by `search=`. Message bodies
+  and tags are also not matched.
+
