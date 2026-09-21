@@ -1,9 +1,12 @@
 import json
 import secrets
 import uuid
+import csv
+import io
 from datetime import date, datetime, timedelta
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, List, Optional
 from litestar import Controller, get, post, patch, Request
+from litestar.response import Stream
 from litestar.exceptions import (
     NotAuthorizedException,
     PermissionDeniedException,
@@ -12,6 +15,7 @@ from litestar.exceptions import (
 )
 from litestar.params import PathParameter, QueryParameter
 from sqlalchemy import select, or_, desc, func
+from sqlalchemy.orm import aliased
 from sqlalchemy.exc import IntegrityError
 from app.db.session import async_session_factory
 from app.db.base import utcnow
@@ -43,7 +47,7 @@ from app.controllers.managed_apps import app_to_response
 from app.controllers.messages import message_to_response
 from app.controllers.ticket_types import parse_fields_schema, type_to_response
 from app.db.search import LIKE_ESCAPE, like_contains
-from app.services.access import require_ticket_view
+from app.services.access import require_staff, require_ticket_view
 from app.services.form_logic import (
     MAX_CUSTOM_FIELDS_JSON_BYTES,
     FieldError,
@@ -55,6 +59,13 @@ from app.services import events as event_bus
 from app.services import audit
 from app.services import notification_service
 from app.services.events import Event, TICKET_CREATED, TICKET_UPDATED
+
+
+def _csv_cell(value: Any) -> str:
+    text = "" if value is None else str(value)
+    if text[:1] in "=+-@":
+        return f"'{text}"
+    return text
 
 
 async def publish_ticket_event(
@@ -492,6 +503,122 @@ class TicketController(Controller):
             ]
 
             return Page[TicketResponse](items=items, total=total, limit=limit, offset=offset)
+
+    @get("/export")
+    async def export_tickets(
+        self,
+        request: Request,
+        created_from: Annotated[Optional[str], QueryParameter()] = None,
+        created_to: Annotated[Optional[str], QueryParameter()] = None,
+        format: Annotated[str, QueryParameter()] = "csv",
+    ) -> Stream:
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise NotAuthorizedException("Authentication required.")
+        require_staff(current_user, "Forbidden: Only support staff can export tickets.")
+        if format != "csv":
+            raise ValidationException("Only format=csv is supported.")
+
+        today = utcnow().date()
+        try:
+            start_day = date.fromisoformat(created_from.strip()) if created_from else today - timedelta(days=30)
+            end_day = date.fromisoformat(created_to.strip()) if created_to else today
+        except ValueError as exc:
+            raise ValidationException("created_from and created_to must be YYYY-MM-DD.") from exc
+        start_at = datetime(start_day.year, start_day.month, start_day.day)
+        end_at = datetime(end_day.year, end_day.month, end_day.day) + timedelta(days=1)
+
+        async with async_session_factory() as session:
+            total = (
+                await session.execute(
+                    select(func.count()).select_from(Ticket).where(
+                        Ticket.created_at >= start_at,
+                        Ticket.created_at < end_at,
+                    )
+                )
+            ).scalar_one()
+        if total > 10000:
+            raise FormValidationError(
+                [
+                    FieldError(
+                        "created_from",
+                        "This range has more than 10,000 tickets. Narrow the dates and try again.",
+                        "Date range",
+                        "too_large",
+                    )
+                ]
+            )
+
+        async def rows() -> AsyncIterator[str]:
+            buffer = io.StringIO()
+            writer = csv.writer(buffer)
+            writer.writerow(
+                [
+                    "ticket_code",
+                    "title",
+                    "status",
+                    "priority",
+                    "category",
+                    "customer",
+                    "assignee",
+                    "created_at",
+                    "first_responded_at",
+                    "resolved_at",
+                    "sla_status",
+                    "tags",
+                ]
+            )
+            yield buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate(0)
+
+            Customer = aliased(User)
+            Agent = aliased(User)
+            offset = 0
+            batch = 500
+            while True:
+                async with async_session_factory() as session:
+                    result = (
+                        await session.execute(
+                            select(Ticket, Customer.full_name, Agent.full_name)
+                            .join(Customer, Customer.id == Ticket.customer_id)
+                            .outerjoin(Agent, Agent.id == Ticket.assigned_agent_id)
+                            .where(Ticket.created_at >= start_at, Ticket.created_at < end_at)
+                            .order_by(Ticket.id)
+                            .limit(batch)
+                            .offset(offset)
+                        )
+                    ).all()
+                if not result:
+                    break
+                for ticket, customer_name, agent_name in result:
+                    sla = get_sla_status(ticket.resolution_due_at, ticket.resolved_at)
+                    writer.writerow(
+                        [
+                            _csv_cell(ticket.ticket_code),
+                            _csv_cell(ticket.title),
+                            _csv_cell(ticket.status),
+                            _csv_cell(ticket.priority),
+                            _csv_cell(ticket.category),
+                            _csv_cell(customer_name),
+                            _csv_cell(agent_name),
+                            _csv_cell(ticket.created_at.isoformat() if ticket.created_at else ""),
+                            _csv_cell(ticket.first_responded_at.isoformat() if ticket.first_responded_at else ""),
+                            _csv_cell(ticket.resolved_at.isoformat() if ticket.resolved_at else ""),
+                            _csv_cell(sla),
+                            _csv_cell(ticket.tags or ""),
+                        ]
+                    )
+                    yield buffer.getvalue()
+                    buffer.seek(0)
+                    buffer.truncate(0)
+                offset += len(result)
+
+        return Stream(
+            rows(),
+            media_type="text/csv; charset=utf-8",
+            headers={"content-disposition": 'attachment; filename="tickets.csv"'},
+        )
 
     @get("/{ticket_id:int}")
     async def get_ticket(self, request: Request, ticket_id: Annotated[int, PathParameter()]) -> TicketResponse:
