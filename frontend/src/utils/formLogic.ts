@@ -282,8 +282,19 @@ function validateTextLike(
       return { error: error(field, `${field.label} must be a full URL starting with http:// or https://`, 'invalid_url') };
     }
   }
-  if (field.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    return { error: error(field, `${field.label} must be a date in YYYY-MM-DD format.`, 'invalid_date') };
+  if (field.type === 'date') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      return { error: error(field, `${field.label} must be a date in YYYY-MM-DD format.`, 'invalid_date') };
+    }
+    const [year, month, day] = text.split('-').map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    if (
+      parsed.getUTCFullYear() !== year ||
+      parsed.getUTCMonth() !== month - 1 ||
+      parsed.getUTCDate() !== day
+    ) {
+      return { error: error(field, `${field.label} must be a date in YYYY-MM-DD format.`, 'invalid_date') };
+    }
   }
   return { value: text };
 }

@@ -157,7 +157,7 @@ async def test_ticket_creation_pure_human_and_isolation():
             "score": 1,
             "comment": "Rogue rating",
         }, headers=c2_h)
-        assert hack_csat.status_code == 403
+        assert hack_csat.status_code == 404
 
         # C1 submits CSAT rating -> 201 OK
         valid_csat = await client.post(f"/api/tickets/{ticket_id}/csat", json={
@@ -242,7 +242,7 @@ async def test_apps_ticket_types_and_faq_engine():
         # 7. Customer queries FAQ engine
         query_res = await client.post("/api/faq/query", json={
             "query": "502 gateway",
-        })
+        }, headers=cust_h)
         assert query_res.status_code in (200, 201)
         q_data = query_res.json()
         assert len(q_data["matches"]) >= 1

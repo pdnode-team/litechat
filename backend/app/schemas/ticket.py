@@ -38,10 +38,10 @@ class TicketUpdateRequest(BaseModel):
     """
 
     title: Optional[str] = Field(default=None, min_length=3, max_length=255)
-    description: Optional[str] = Field(default=None, min_length=5)
+    description: Optional[str] = Field(default=None, min_length=5, max_length=20000)
     category: Optional[Literal["technical", "billing", "account", "general"]] = None
-    tags: Optional[str] = None
-    target_url: Optional[str] = None
+    tags: Optional[str] = Field(default=None, max_length=500)
+    target_url: Optional[str] = Field(default=None, max_length=500)
 
 class TicketResponse(BaseModel):
     id: int

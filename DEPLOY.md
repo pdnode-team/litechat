@@ -117,8 +117,9 @@ LOG_LEVEL=INFO
 # LOG_FILE=/app/logs/litechat.log
 ```
 
-关于 `TRUST_PROXY_HEADERS=true`：Traefik 会带 `X-Forwarded-For`，打开后限流才能按真实客户端 IP 统计。
+关于 `TRUST_PROXY_HEADERS=true`：打开后限流优先读 `X-Real-IP`，否则取 `X-Forwarded-For` 的**最右一跳**（Traefik 追加的真实对端）。不要用最左跳，那是客户端可伪造的。
 只有确定前面有可信代理时才开（这里是 Traefik，安全）。
+`FORWARDED_ALLOW_IPS` 默认是 `*`（容器只被 Traefik 访问时可以）。如果后端端口对其他网络暴露，改成 Traefik 的地址。
 
 关于邮件：**SMTP 不一定要写在这里**，可以在应用里配置（见第 7 步）。
 数据库里的设置优先于环境变量。

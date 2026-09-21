@@ -148,7 +148,7 @@ class ManagedAppController(Controller):
 
         async with async_session_factory() as session:
             filters = []
-            if active_only:
+            if current_user.role == "customer" or active_only:
                 filters.append(ManagedApp.is_active.is_(True))
 
             total = (

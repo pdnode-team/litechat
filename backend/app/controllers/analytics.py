@@ -41,11 +41,11 @@ class AnalyticsController(Controller):
                 sla_res = get_sla_status(t.resolution_due_at, t.resolved_at)
                 if sla_res == "breached":
                     breached_count += 1
-                elif sla_res == "fulfilled":
-                    sla_fulfilled_count += 1
 
                 if t.status in ("resolved", "closed"):
                     resolved_or_closed_count += 1
+                    if sla_res == "fulfilled":
+                        sla_fulfilled_count += 1
 
             sla_rate = (
                 round((sla_fulfilled_count / resolved_or_closed_count) * 100, 1)

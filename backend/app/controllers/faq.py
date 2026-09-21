@@ -5,6 +5,7 @@ from litestar import Controller, get, post, put, delete, Request
 from litestar.exceptions import NotAuthorizedException, PermissionDeniedException, NotFoundException
 from litestar.params import PathParameter, QueryParameter
 from sqlalchemy import select, or_, func
+from app.db.search import LIKE_ESCAPE, like_contains
 from app.db.session import async_session_factory
 from app.models.faq_item import FaqItem
 from app.schemas.faq import (
@@ -69,19 +70,23 @@ class FaqController(Controller):
         limit: LimitParam = DEFAULT_PAGE_SIZE,
         offset: OffsetParam = 0,
     ) -> Page[FaqItemResponse]:
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise NotAuthorizedException("Authentication required.")
+
         async with async_session_factory() as session:
             filters = []
-            if active_only:
+            if current_user.role != "admin" or active_only:
                 filters.append(FaqItem.is_active.is_(True))
             if category:
                 filters.append(FaqItem.category == category)
             if search:
-                term = f"%{search.strip().lower()}%"
+                term = like_contains(search.strip())
                 filters.append(
                     or_(
-                        FaqItem.question.ilike(term),
-                        FaqItem.answer.ilike(term),
-                        FaqItem.keywords.ilike(term),
+                        FaqItem.question.ilike(term, escape=LIKE_ESCAPE),
+                        FaqItem.answer.ilike(term, escape=LIKE_ESCAPE),
+                        FaqItem.keywords.ilike(term, escape=LIKE_ESCAPE),
                     )
                 )
 
@@ -101,7 +106,11 @@ class FaqController(Controller):
             return Page[FaqItemResponse](items=items, total=total, limit=limit, offset=offset)
 
     @post("/query")
-    async def query_faq_engine(self, data: FaqQueryRequest) -> FaqQueryResponse:
+    async def query_faq_engine(self, request: Request, data: FaqQueryRequest) -> FaqQueryResponse:
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise NotAuthorizedException("Authentication required.")
+
         query_str = data.query.strip().lower()
         query_words = _tokenize(query_str)
 
@@ -159,9 +168,12 @@ class FaqController(Controller):
 
             # An empty query (browsing) shows the recommended articles; a real
             # query must clear MIN_RELEVANCE_SCORE to be considered a match.
-            MIN_RELEVANCE_SCORE = 3
+            MIN_RELEVANCE_SCORE = 2
             if query_str:
                 matches = [pair for pair in matches if pair[0] >= MIN_RELEVANCE_SCORE]
+            else:
+                recommended = sorted(all_faqs, key=lambda item: (item.sort_order, item.id))[:5]
+                matches = [(0, item) for item in recommended]
 
             top_items = [faq_to_response(item) for score, item in matches[:5]]
 

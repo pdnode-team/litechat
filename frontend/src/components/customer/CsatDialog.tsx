@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Star, X, CheckCircle } from 'lucide-react';
 import { csatApi } from '../../api/client';
 import { Modal } from '../common/Modal';
+import { apiErrorMessage } from '../../utils/errors';
+import { useToast } from '../common/Toast';
 
 interface Props {
   ticketId: number;
@@ -12,18 +14,26 @@ interface Props {
 }
 
 export const CsatDialog: React.FC<Props> = ({ ticketId, ticketTitle, isOpen, onClose, onSubmitted }) => {
+  const { showError } = useToast();
   const [rating, setRating] = useState<number>(5);
   const [hoverRating, setHoverRating] = useState<number>(0);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const closeTimer = useRef<number | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isOpen) {
       setSubmitted(false);
       setRating(5);
       setComment('');
     }
+    return () => {
+      if (closeTimer.current !== null) {
+        window.clearTimeout(closeTimer.current);
+        closeTimer.current = null;
+      }
+    };
   }, [isOpen, ticketId]);
 
   const handleSubmit = async () => {
@@ -31,12 +41,12 @@ export const CsatDialog: React.FC<Props> = ({ ticketId, ticketTitle, isOpen, onC
     try {
       await csatApi.submit(ticketId, { score: rating, comment });
       setSubmitted(true);
-      setTimeout(() => {
+      closeTimer.current = window.setTimeout(() => {
         if (onSubmitted) onSubmitted();
         onClose();
       }, 1500);
     } catch (err) {
-      console.error('Failed to submit CSAT', err);
+      showError(apiErrorMessage(err, 'Failed to submit your rating.'));
     } finally {
       setSubmitting(false);
     }

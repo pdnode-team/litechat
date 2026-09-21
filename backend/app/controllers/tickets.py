@@ -11,6 +11,7 @@ from litestar.exceptions import (
 )
 from litestar.params import PathParameter, QueryParameter
 from sqlalchemy import select, or_, desc, func
+from sqlalchemy.exc import IntegrityError
 from app.db.session import async_session_factory
 from app.db.base import utcnow
 from app.models.ticket import Ticket
@@ -40,6 +41,8 @@ from app.controllers.auth import get_current_user_from_request
 from app.controllers.managed_apps import app_to_response
 from app.controllers.messages import message_to_response
 from app.controllers.ticket_types import parse_fields_schema, type_to_response
+from app.db.search import LIKE_ESCAPE, like_contains
+from app.services.access import require_ticket_view
 from app.services.form_logic import (
     MAX_CUSTOM_FIELDS_JSON_BYTES,
     FieldError,
@@ -107,6 +110,7 @@ async def publish_ticket_event(
                 "title": ticket.title,
                 "status": ticket.status,
                 "priority": ticket.priority,
+                "category": ticket.category,
                 "customer_id": ticket.customer_id,
                 "assigned_agent_id": ticket.assigned_agent_id,
                 "actor_name": actor_name,
@@ -299,10 +303,15 @@ class TicketController(Controller):
                 tags=cleaned["tags"],
             )
             session.add(ticket)
-            await session.commit()
-            await session.refresh(ticket)
+            try:
+                await session.flush()
+            except IntegrityError:
+                await session.rollback()
+                ticket_code = f"TCK-{now.year}-{uuid.uuid4().hex[:8].upper()}"
+                ticket.ticket_code = ticket_code
+                session.add(ticket)
+                await session.flush()
 
-            # Record customer initial message
             initial_msg = Message(
                 ticket_id=ticket.id,
                 sender_id=current_user.id,
@@ -313,6 +322,7 @@ class TicketController(Controller):
             )
             session.add(initial_msg)
             await session.commit()
+            await session.refresh(ticket)
 
             resp = build_ticket_response(
                 ticket,
@@ -344,6 +354,8 @@ class TicketController(Controller):
         category: Annotated[Optional[str], QueryParameter()] = None,
         search: Annotated[Optional[str], QueryParameter()] = None,
         assigned_to_me: Annotated[Optional[bool], QueryParameter()] = None,
+        unassigned: Annotated[Optional[bool], QueryParameter()] = None,
+        priority_in: Annotated[Optional[str], QueryParameter()] = None,
         limit: LimitParam = DEFAULT_PAGE_SIZE,
         offset: OffsetParam = 0,
     ) -> Page[TicketResponse]:
@@ -357,22 +369,29 @@ class TicketController(Controller):
             # Strictly enforce: Customers see ONLY their own tickets
             if current_user.role == "customer":
                 filters.append(Ticket.customer_id == current_user.id)
-            elif assigned_to_me and current_user.role in ("agent", "admin"):
-                filters.append(Ticket.assigned_agent_id == current_user.id)
+            elif current_user.role in ("agent", "admin"):
+                if assigned_to_me:
+                    filters.append(Ticket.assigned_agent_id == current_user.id)
+                if unassigned:
+                    filters.append(Ticket.assigned_agent_id.is_(None))
 
             if status:
                 filters.append(Ticket.status == status)
-            if priority:
+            if priority_in:
+                wanted = [part.strip() for part in priority_in.split(",") if part.strip()]
+                if wanted:
+                    filters.append(Ticket.priority.in_(wanted))
+            elif priority:
                 filters.append(Ticket.priority == priority)
             if category:
                 filters.append(Ticket.category == category)
             if search:
-                term = f"%{search.strip()}%"
+                term = like_contains(search.strip())
                 filters.append(
                     or_(
-                        Ticket.title.ilike(term),
-                        Ticket.ticket_code.ilike(term),
-                        Ticket.description.ilike(term),
+                        Ticket.title.ilike(term, escape=LIKE_ESCAPE),
+                        Ticket.ticket_code.ilike(term, escape=LIKE_ESCAPE),
+                        Ticket.description.ilike(term, escape=LIKE_ESCAPE),
                     )
                 )
 
@@ -439,13 +458,7 @@ class TicketController(Controller):
             raise NotAuthorizedException("Authentication required.")
 
         async with async_session_factory() as session:
-            ticket = await session.get(Ticket, ticket_id)
-            if not ticket:
-                raise NotFoundException("Ticket not found.")
-
-            # Strict RBAC: Customers cannot view other users' tickets
-            if current_user.role == "customer" and ticket.customer_id != current_user.id:
-                raise PermissionDeniedException("Forbidden: You do not have permission to view this ticket.")
+            ticket = require_ticket_view(current_user, await session.get(Ticket, ticket_id))
 
             customer = await session.get(User, ticket.customer_id)
             agent = await session.get(User, ticket.assigned_agent_id) if ticket.assigned_agent_id else None
@@ -473,34 +486,38 @@ class TicketController(Controller):
             raise NotAuthorizedException("Authentication required.")
 
         async with async_session_factory() as session:
-            ticket = await session.get(Ticket, ticket_id)
-            if not ticket:
-                raise NotFoundException("Ticket not found.")
+            ticket = require_ticket_view(current_user, await session.get(Ticket, ticket_id))
 
-            if current_user.role == "customer" and ticket.customer_id != current_user.id:
-                raise PermissionDeniedException("Forbidden: You cannot modify this ticket.")
-
-            if ticket.status in ("closed",) and current_user.role == "customer":
+            if ticket.status in ("closed", "resolved") and current_user.role == "customer":
                 raise ValidationException("This ticket is closed. Reopen it before editing.")
 
+            cleaned, problems = validate_base_fields(
+                title=data.title if data.title is not None else ticket.title,
+                description=data.description if data.description is not None else ticket.description,
+                tags=data.tags if data.tags is not None else (ticket.tags or ""),
+                target_url=data.target_url if data.target_url is not None else ticket.target_url,
+                category=data.category if data.category is not None else ticket.category,
+                priority=ticket.priority,
+            )
+            if problems:
+                raise FormValidationError(problems)
+
             changes = []
-            if data.title is not None and data.title.strip() != ticket.title:
-                changes.append(f"title -> '{data.title.strip()}'")
-                ticket.title = data.title.strip()
-            if data.description is not None and data.description.strip() != ticket.description:
+            if data.title is not None and cleaned["title"] != ticket.title:
+                changes.append(f"title -> '{cleaned['title']}'")
+                ticket.title = cleaned["title"]
+            if data.description is not None and cleaned["description"] != ticket.description:
                 changes.append("description updated")
-                ticket.description = data.description.strip()
-            if data.category is not None and data.category != ticket.category:
-                changes.append(f"category {ticket.category} -> {data.category}")
-                ticket.category = data.category
-            if data.tags is not None and data.tags != (ticket.tags or ""):
+                ticket.description = cleaned["description"]
+            if data.category is not None and cleaned["category"] != ticket.category:
+                changes.append(f"category {ticket.category} -> {cleaned['category']}")
+                ticket.category = cleaned["category"]
+            if data.tags is not None and cleaned["tags"] != (ticket.tags or ""):
                 changes.append("tags updated")
-                ticket.tags = data.tags
-            if data.target_url is not None:
-                new_url = data.target_url.strip() or None
-                if new_url != ticket.target_url:
-                    changes.append("target URL updated")
-                    ticket.target_url = new_url
+                ticket.tags = cleaned["tags"]
+            if data.target_url is not None and cleaned["target_url"] != ticket.target_url:
+                changes.append("target URL updated")
+                ticket.target_url = cleaned["target_url"]
 
             action_msg: Optional[Message] = None
             if changes:
@@ -529,6 +546,7 @@ class TicketController(Controller):
                     resp,
                     reason="details_edited",
                     actor_name=current_user.full_name,
+                    context={"actor_email": current_user.email},
                     system_message=message_to_response(action_msg) if action_msg else None,
                 )
             return resp
@@ -544,28 +562,38 @@ class TicketController(Controller):
             raise ValidationException(f"Invalid status: {data.status}")
 
         async with async_session_factory() as session:
-            ticket = await session.get(Ticket, ticket_id)
-            if not ticket:
-                raise NotFoundException("Ticket not found.")
-
-            # Strict RBAC: Customer can only update status on their own ticket
-            if current_user.role == "customer":
-                if ticket.customer_id != current_user.id:
-                    raise PermissionDeniedException("Forbidden: You cannot modify this ticket.")
-                if data.status not in ["resolved", "closed", "open"]:
-                    raise PermissionDeniedException("Customers can only close, resolve, or reopen tickets.")
+            ticket = require_ticket_view(current_user, await session.get(Ticket, ticket_id))
 
             old_status = ticket.status
+            if current_user.role == "customer":
+                if data.status not in ["resolved", "closed", "open"]:
+                    raise PermissionDeniedException("Customers can only close, resolve, or reopen tickets.")
+                if data.status == "open" and old_status not in ("resolved", "closed"):
+                    raise PermissionDeniedException("Customers can only reopen resolved or closed tickets.")
+
+            if old_status == data.status:
+                customer = await session.get(User, ticket.customer_id)
+                agent = await session.get(User, ticket.assigned_agent_id) if ticket.assigned_agent_id else None
+                app = await session.get(ManagedApp, ticket.app_id) if ticket.app_id else None
+                ticket_type = await session.get(TicketType, ticket.ticket_type_id) if ticket.ticket_type_id else None
+                return build_ticket_response(ticket, customer=customer, agent=agent, app=app, ticket_type=ticket_type)
+
             ticket.status = data.status
             now = utcnow()
 
-            if data.status in ("resolved", "closed") and not ticket.resolved_at:
-                ticket.resolved_at = now
-            if data.status == "closed" and not ticket.closed_at:
-                ticket.closed_at = now
-            elif data.status in ["open", "in_progress"] and old_status in ["resolved", "closed"]:
+            if data.status in ("resolved", "closed"):
+                if not ticket.resolved_at:
+                    ticket.resolved_at = now
+                if data.status == "closed":
+                    if not ticket.closed_at:
+                        ticket.closed_at = now
+                else:
+                    ticket.closed_at = None
+            elif old_status in ("resolved", "closed"):
                 ticket.resolved_at = None
                 ticket.closed_at = None
+                _, res_due = calculate_sla_deadlines(ticket.priority, now)
+                ticket.resolution_due_at = res_due
 
             sys_msg = Message(
                 ticket_id=ticket.id,
@@ -594,6 +622,7 @@ class TicketController(Controller):
                 reason="status_changed",
                 email_kind=notification_service.KIND_RESOLVED if notify_customer else None,
                 actor_name=current_user.full_name,
+                context={"actor_email": current_user.email},
                 system_message=message_to_response(sys_msg),
             )
             return resp
@@ -614,8 +643,12 @@ class TicketController(Controller):
             target_agent = None
             if data.agent_id:
                 target_agent = await session.get(User, data.agent_id)
-                if not target_agent or target_agent.role not in ("agent", "admin"):
-                    raise ValidationException("Assigned user must be staff.")
+                if (
+                    not target_agent
+                    or not target_agent.is_active
+                    or target_agent.role not in ("agent", "admin")
+                ):
+                    raise ValidationException("Assigned user must be active staff.")
                 ticket.assigned_agent_id = target_agent.id
                 if ticket.status == "open":
                     ticket.status = "in_progress"
@@ -650,6 +683,7 @@ class TicketController(Controller):
                 reason="assignment_changed",
                 email_kind=notification_service.KIND_ASSIGNED if target_agent else None,
                 actor_name=current_user.full_name,
+                context={"actor_email": current_user.email},
                 system_message=message_to_response(sys_msg),
             )
             return resp
@@ -706,6 +740,7 @@ class TicketController(Controller):
                 resp,
                 reason="priority_changed",
                 actor_name=current_user.full_name,
+                context={"actor_email": current_user.email},
                 system_message=message_to_response(sys_msg),
             )
             return resp

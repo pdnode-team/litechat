@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
 
 type ToastTone = 'success' | 'error';
@@ -25,6 +25,14 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
  */
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const timers = useRef<number[]>([]);
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      pending.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
 
   const dismiss = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -34,7 +42,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     (tone: ToastTone, message: string) => {
       const id = Date.now() + Math.random();
       setToasts((prev) => [...prev, { id, tone, message }]);
-      setTimeout(() => dismiss(id), tone === 'error' ? 6000 : 3500);
+      const timer = window.setTimeout(() => dismiss(id), tone === 'error' ? 6000 : 3500);
+      timers.current.push(timer);
     },
     [dismiss]
   );

@@ -48,12 +48,7 @@ async def send_email(to: str, subject: str, body: str) -> bool:
 
     config = await settings_service.get_all()
     if not config.get("smtp_enabled") or not config.get("smtp_host"):
-        logger.warning(
-            "SMTP not configured - email to %s was not sent. Subject: %s\n%s",
-            to,
-            subject,
-            body,
-        )
+        logger.warning("SMTP not configured - email to %s was not sent. Subject: %s", to, subject)
         return False
 
     message = _build_message(config["smtp_from"], to, subject, body)

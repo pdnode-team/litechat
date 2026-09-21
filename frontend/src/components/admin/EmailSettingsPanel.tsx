@@ -44,6 +44,7 @@ export const EmailSettingsPanel: React.FC = () => {
   const [password, setPassword] = useState('');
   const [testTo, setTestTo] = useState('');
   const [testing, setTesting] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState<string>('');
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +53,7 @@ export const EmailSettingsPanel: React.FC = () => {
       .then((data) => {
         if (cancelled) return;
         setSettings(data);
+        setSavedSnapshot(JSON.stringify({ ...data, smtp_password_set: data.smtp_password_set }));
         setTestTo(data.smtp_from);
       })
       .catch((err) => {
@@ -94,6 +96,7 @@ export const EmailSettingsPanel: React.FC = () => {
         support_email: settings.support_email,
       });
       setSettings(withNotifications);
+      setSavedSnapshot(JSON.stringify({ ...withNotifications, smtp_password_set: withNotifications.smtp_password_set }));
       void updated;
       setPassword('');
       showSuccess('Settings saved');
@@ -104,8 +107,12 @@ export const EmailSettingsPanel: React.FC = () => {
     }
   };
 
+  const smtpDirty =
+    Boolean(password) ||
+    (settings !== null && JSON.stringify({ ...settings, smtp_password_set: settings.smtp_password_set }) !== savedSnapshot);
+
   const handleTest = async () => {
-    if (!testTo.trim()) return;
+    if (!testTo.trim() || smtpDirty) return;
     setTesting(true);
     try {
       const result = await settingsApi.sendTestEmail(testTo.trim());
@@ -256,7 +263,8 @@ export const EmailSettingsPanel: React.FC = () => {
             <button
               type="button"
               onClick={handleTest}
-              disabled={testing || !testTo.trim()}
+              disabled={testing || !testTo.trim() || smtpDirty}
+              title={smtpDirty ? 'Save the SMTP settings before sending a test.' : undefined}
               className="px-3 py-2 text-xs font-medium rounded-lg border border-zinc-700 text-zinc-200 hover:bg-zinc-800 transition disabled:opacity-40 flex items-center gap-1.5"
             >
               <Send className="w-3.5 h-3.5" />

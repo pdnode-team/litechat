@@ -3,6 +3,8 @@ import { ArrowRight, CheckCircle2, KeyRound, Lock, MailCheck, ShieldAlert } from
 import { authApi } from '../../api/client';
 import { apiErrorMessage } from '../../utils/errors';
 
+export type RecoveryTokens = { reset: string | null; verify: string | null };
+
 /** Reads a one-time token from the URL and then strips it from the address bar. */
 const takeToken = (key: 'reset_token' | 'verify_token'): string | null => {
   const params = new URLSearchParams(window.location.search);
@@ -13,6 +15,12 @@ const takeToken = (key: 'reset_token' | 'verify_token'): string | null => {
   window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
   return token;
 };
+
+/** Capture both recovery tokens and strip them from the URL in one pass. */
+export const takeRecoveryTokens = (): RecoveryTokens => ({
+  reset: takeToken('reset_token'),
+  verify: takeToken('verify_token'),
+});
 
 export const ResetPasswordView: React.FC<{
   token: string;
@@ -136,15 +144,10 @@ export const VerifyEmailView: React.FC<{ token: string; onDone: () => void }> = 
   );
 };
 
-/** Chooses the right recovery screen for the token present in the URL. */
-export const PasswordRecoveryGate: React.FC = () => {
-  const [token] = useState(() => ({
-    reset: takeToken('reset_token'),
-    verify: takeToken('verify_token'),
-  }));
-
-  if (token.reset) return <ResetPasswordView token={token.reset} onDone={() => window.location.reload()} />;
-  if (token.verify) return <VerifyEmailView token={token.verify} onDone={() => window.location.reload()} />;
+/** Chooses the right recovery screen for tokens captured at app bootstrap. */
+export const PasswordRecoveryGate: React.FC<{ tokens: RecoveryTokens }> = ({ tokens }) => {
+  if (tokens.reset) return <ResetPasswordView token={tokens.reset} onDone={() => window.location.reload()} />;
+  if (tokens.verify) return <VerifyEmailView token={tokens.verify} onDone={() => window.location.reload()} />;
   return null;
 };
 

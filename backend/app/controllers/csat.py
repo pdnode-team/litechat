@@ -1,13 +1,15 @@
 from typing import Annotated, Optional
 from litestar import Controller, get, post, Request
-from litestar.exceptions import NotAuthorizedException, PermissionDeniedException, NotFoundException, ValidationException
+from litestar.exceptions import NotAuthorizedException, PermissionDeniedException, ValidationException
 from litestar.params import PathParameter
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from app.db.session import async_session_factory
 from app.models.ticket import Ticket
 from app.models.csat_rating import CSATRating
 from app.schemas.csat import CSATCreate, CSATResponse
 from app.controllers.auth import get_current_user_from_request
+from app.services.access import require_ticket_view
 from app.services import events as event_bus
 from app.services.events import CSAT_SUBMITTED, Event
 
@@ -38,13 +40,7 @@ class CSATController(Controller):
             raise NotAuthorizedException("Authentication required")
 
         async with async_session_factory() as session:
-            ticket = await session.get(Ticket, ticket_id)
-            if not ticket:
-                raise NotFoundException("Ticket not found")
-
-            # Ownership check: Customer can only view CSAT of their own tickets
-            if current_user.role == "customer" and ticket.customer_id != current_user.id:
-                raise PermissionDeniedException("Forbidden: You do not have permission to access CSAT for this ticket.")
+            require_ticket_view(current_user, await session.get(Ticket, ticket_id))
 
             stmt = select(CSATRating).where(CSATRating.ticket_id == ticket_id)
             rating = (await session.execute(stmt)).scalar_one_or_none()
@@ -65,9 +61,7 @@ class CSATController(Controller):
             raise ValidationException("CSAT rating score must be between 1 and 5.")
 
         async with async_session_factory() as session:
-            ticket = await session.get(Ticket, ticket_id)
-            if not ticket:
-                raise NotFoundException("Ticket not found")
+            ticket = require_ticket_view(current_user, await session.get(Ticket, ticket_id))
 
             if ticket.customer_id != current_user.id:
                 raise PermissionDeniedException("Forbidden: You can only rate your own tickets.")
@@ -78,12 +72,7 @@ class CSATController(Controller):
             stmt = select(CSATRating).where(CSATRating.ticket_id == ticket_id)
             existing = (await session.execute(stmt)).scalar_one_or_none()
             if existing:
-                existing.score = data.score
-                existing.comment = data.comment
-                await session.commit()
-                await session.refresh(existing)
-                await event_bus.publish(_csat_event(ticket, existing.score))
-                return CSATResponse.model_validate(existing)
+                raise ValidationException("A rating has already been submitted for this ticket.")
 
             rating = CSATRating(
                 ticket_id=ticket_id,
@@ -92,7 +81,11 @@ class CSATController(Controller):
                 comment=data.comment,
             )
             session.add(rating)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                raise ValidationException("A rating has already been submitted for this ticket.") from None
             await session.refresh(rating)
             await event_bus.publish(_csat_event(ticket, rating.score))
             return CSATResponse.model_validate(rating)

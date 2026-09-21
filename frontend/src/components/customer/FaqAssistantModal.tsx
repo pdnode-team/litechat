@@ -22,6 +22,7 @@ export const FaqAssistantModal: React.FC<Props> = ({
   const [queryResult, setQueryResult] = useState<FaqQueryResult | null>(null);
   const [recentFaqs, setRecentFaqs] = useState<FaqItem[]>([]);
   const [selectedFaq, setSelectedFaq] = useState<FaqItem | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -34,8 +35,14 @@ export const FaqAssistantModal: React.FC<Props> = ({
     setSelectedFaq(null);
 
     faqApi.listAll({ active_only: true })
-      .then((items) => setRecentFaqs(items.slice(0, 8)))
-      .catch((err) => console.error('Failed to load initial FAQs', err));
+      .then((items) => {
+        setError(null);
+        setRecentFaqs(items.slice(0, 8));
+      })
+      .catch((err) => {
+        console.error('Failed to load initial FAQs', err);
+        setError('Could not load help articles.');
+      });
   }, [isOpen]);
 
   const handleSearch = async (textToSearch: string, categoryOverride?: string) => {
@@ -44,6 +51,7 @@ export const FaqAssistantModal: React.FC<Props> = ({
     const cat = categoryOverride !== undefined ? categoryOverride : selectedCategory;
     try {
       const result = await faqApi.query(textToSearch.trim(), cat);
+      setError(null);
       setQueryResult(result);
       if (result.matches.length > 0) {
         setSelectedFaq(result.matches[0]);
@@ -52,6 +60,7 @@ export const FaqAssistantModal: React.FC<Props> = ({
       }
     } catch (err) {
       console.error('FAQ query failed', err);
+      setError('The assistant could not search right now. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -127,6 +136,11 @@ export const FaqAssistantModal: React.FC<Props> = ({
               {loading ? 'Searching...' : 'Ask Engine'}
             </button>
           </form>
+          {error && (
+            <p className="mt-2 text-[11px] text-rose-300 font-mono" role="alert">
+              {error}
+            </p>
+          )}
         </div>
 
         {/* Category Pills */}

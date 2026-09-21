@@ -100,10 +100,17 @@ class CannedResponseController(Controller):
             if existing:
                 raise duplicate_shortcut_error(shortcut)
 
+            title = data.title.strip()
+            content = data.content.strip()
+            if not title:
+                raise FormValidationError([FieldError("title", "A title is required.", "Title", "required")])
+            if not content:
+                raise FormValidationError([FieldError("content", "Content is required.", "Content", "required")])
+
             item = CannedResponse(
                 shortcut=shortcut,
-                title=data.title.strip(),
-                content=data.content.strip(),
+                title=title,
+                content=content,
                 category=data.category,
             )
             session.add(item)

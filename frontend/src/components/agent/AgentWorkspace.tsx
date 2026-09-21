@@ -150,7 +150,9 @@ export const AgentWorkspace: React.FC = () => {
   const [loadingTickets, setLoadingTickets] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [queueTab, setQueueTab] = useState<'all' | 'mine' | 'unassigned' | 'urgent'>('all');
+  const [listError, setListError] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [agentsList, setAgentsList] = useState<User[]>([]);
   const [editing, setEditing] = useState(false);
@@ -171,14 +173,21 @@ export const AgentWorkspace: React.FC = () => {
   // it depend on `selectedTicket` would retrigger the effect on every refresh.
   const fetchTickets = useCallback(async () => {
     try {
-      // Refetch what is already on screen (plus a page) so new tickets appear
-      // without discarding pages the agent already loaded.
-      const limit = Math.max(PAGE_SIZE, loadedTicketsRef.current);
-      const page = await ticketsApi.list({ limit, offset: 0 });
+      const limit = Math.max(PAGE_SIZE, loadedTicketsRef.current || PAGE_SIZE);
+      const page = await ticketsApi.list({
+        limit,
+        offset: 0,
+        search: debouncedSearch.trim() || undefined,
+        assigned_to_me: queueTab === 'mine' || undefined,
+        unassigned: queueTab === 'unassigned' || undefined,
+        priority_in: queueTab === 'urgent' ? 'high,urgent' : undefined,
+      });
+      setListError(null);
       setTickets(page.items);
       setTicketsTotal(page.total);
       const currentId = selectedTicketRef.current;
       if (currentId === null && page.items.length > 0) {
+        selectedTicketRef.current = page.items[0].id;
         setSelectedTicket(page.items[0]);
       } else if (currentId !== null) {
         const updated = page.items.find((t) => t.id === currentId);
@@ -186,15 +195,23 @@ export const AgentWorkspace: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to load tickets', err);
+      setListError(apiErrorMessage(err, 'Failed to load tickets.'));
     } finally {
       setLoadingTickets(false);
     }
-  }, []);
+  }, [debouncedSearch, queueTab]);
 
   const loadMoreTickets = async () => {
     setLoadingMoreTickets(true);
     try {
-      const page = await ticketsApi.list({ limit: PAGE_SIZE, offset: tickets.length });
+      const page = await ticketsApi.list({
+        limit: PAGE_SIZE,
+        offset: tickets.length,
+        search: debouncedSearch.trim() || undefined,
+        assigned_to_me: queueTab === 'mine' || undefined,
+        unassigned: queueTab === 'unassigned' || undefined,
+        priority_in: queueTab === 'urgent' ? 'high,urgent' : undefined,
+      });
       setTickets((prev) => {
         const seen = new Set(prev.map((t) => t.id));
         return [...prev, ...page.items.filter((t) => !seen.has(t.id))];
@@ -208,6 +225,13 @@ export const AgentWorkspace: React.FC = () => {
   };
 
   useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    loadedTicketsRef.current = 0;
+    setLoadingTickets(true);
     fetchTickets();
   }, [fetchTickets, user?.id]);
 
@@ -321,14 +345,16 @@ export const AgentWorkspace: React.FC = () => {
   ) => {
     if (!selectedTicket) return;
     try {
-      await messagesApi.send(selectedTicket.id, {
+      const created = await messagesApi.send(selectedTicket.id, {
         content,
         message_type: type,
         attachments,
       });
+      setMessages((prev) => mergeMessage(prev, created));
       fetchTickets();
     } catch (err) {
-      console.error('Failed to send message', err);
+      showError(apiErrorMessage(err, 'Failed to send the message.'));
+      throw err;
     }
   };
 
@@ -344,7 +370,7 @@ export const AgentWorkspace: React.FC = () => {
     try {
       const page = await messagesApi.list(currentId, {
         limit: MESSAGE_PAGE_SIZE,
-        offset: messages.length,
+        before_id: messages[0]?.id,
       });
       if (selectedTicketRef.current !== currentId) return;
       setMessages((prev) => {
@@ -432,21 +458,7 @@ export const AgentWorkspace: React.FC = () => {
     }
   };
 
-  // Filter queue
-  const filteredTickets = tickets.filter((t) => {
-    const matchesSearch =
-      !searchQuery ||
-      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.ticket_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (t.customer?.full_name && t.customer.full_name.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    if (!matchesSearch) return false;
-
-    if (queueTab === 'mine') return t.assigned_agent_id === user?.id;
-    if (queueTab === 'unassigned') return !t.assigned_agent_id;
-    if (queueTab === 'urgent') return t.priority === 'urgent' || t.priority === 'high';
-    return true;
-  });
+  const filteredTickets = tickets;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 w-full flex-1 flex flex-col">
@@ -522,6 +534,8 @@ export const AgentWorkspace: React.FC = () => {
           <div className="flex-1 overflow-y-auto divide-y divide-zinc-800/60">
             {loadingTickets ? (
               <div className="p-6 text-center text-xs font-mono text-zinc-500">Loading queue...</div>
+            ) : listError && filteredTickets.length === 0 ? (
+              <div className="p-8 text-center text-xs text-rose-300">{listError}</div>
             ) : filteredTickets.length === 0 ? (
               <div className="p-8 text-center text-xs text-zinc-500">No active tickets in queue.</div>
             ) : (
@@ -533,10 +547,14 @@ export const AgentWorkspace: React.FC = () => {
                     role="button"
                     tabIndex={0}
                     aria-current={isSelected}
-                    onClick={() => setSelectedTicket(ticket)}
+                    onClick={() => {
+                      selectedTicketRef.current = ticket.id;
+                      setSelectedTicket(ticket);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
+                        selectedTicketRef.current = ticket.id;
                         setSelectedTicket(ticket);
                       }
                     }}
@@ -710,6 +728,7 @@ export const AgentWorkspace: React.FC = () => {
               onSendMessage={handleSendMessage}
               onTyping={handleTyping}
               userRole={user?.role}
+              disabled={selectedTicket.status === 'closed'}
             />
           </div>
         ) : (
@@ -737,8 +756,13 @@ export const AgentWorkspace: React.FC = () => {
                   <div className="text-xs font-medium text-zinc-200 truncate">
                     {selectedTicket.customer?.full_name || 'Customer'}
                   </div>
-                  <div className="text-[11px] font-mono text-zinc-500 truncate">
-                    {selectedTicket.customer?.email || 'customer@example.com'}
+                  <div className="text-[11px] font-mono text-zinc-500 truncate flex items-center gap-1">
+                    <span>{selectedTicket.customer?.email || '—'}</span>
+                    {selectedTicket.customer && !selectedTicket.customer.email_verified && (
+                      <span className="text-[9px] uppercase tracking-wider text-amber-400 border border-amber-800/70 px-1 rounded">
+                        Unverified
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -890,7 +914,10 @@ export const AgentWorkspace: React.FC = () => {
                   <div className="pt-1.5 border-t border-zinc-800/80 space-y-1.5">
                     {Object.entries(selectedTicket.custom_fields).map(([k, v]) => (
                       <div key={k} className="flex items-start justify-between gap-2 text-xs font-mono">
-                        <span className="text-zinc-500 capitalize">{k.replace('_', ' ')}</span>
+                        <span className="text-zinc-500 capitalize">
+                          {selectedTicket.ticket_type?.fields_schema?.find((field) => field.key === k)?.label
+                            || k.replaceAll('_', ' ')}
+                        </span>
                         <span className="text-zinc-200 font-medium text-right break-all">
                           {typeof v === 'boolean'
                             ? v ? 'Yes' : 'No'

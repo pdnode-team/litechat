@@ -88,7 +88,7 @@ class TicketTypeController(Controller):
 
         async with async_session_factory() as session:
             filters = []
-            if active_only:
+            if current_user.role == "customer" or active_only:
                 filters.append(TicketType.is_active.is_(True))
 
             total = (
@@ -115,10 +115,17 @@ class TicketTypeController(Controller):
             raise PermissionDeniedException("Forbidden: Only administrators can manage ticket types.")
 
         async with async_session_factory() as session:
-            existing = await session.execute(select(TicketType).where(TicketType.code == data.code.strip().lower()))
+            name = data.name.strip()
+            code = data.code.strip().lower()
+            if not name:
+                raise FormValidationError([FieldError("name", "A name is required.", "Name", "required")])
+            if not code:
+                raise FormValidationError([FieldError("code", "A code is required.", "Code", "required")])
+
+            existing = await session.execute(select(TicketType).where(TicketType.code == code))
             if existing.scalar_one_or_none():
                 raise FormValidationError(
-                    [FieldError("code", f"A ticket type with the code '{data.code}' already exists.", "Code", "duplicate")]
+                    [FieldError("code", f"A ticket type with the code '{code}' already exists.", "Code", "duplicate")]
                 )
 
             problems = validate_field_schema(data.fields_schema)
@@ -126,14 +133,22 @@ class TicketTypeController(Controller):
                 raise FormValidationError(problems)
 
             new_type = TicketType(
-                name=data.name.strip(),
-                code=data.code.strip().lower(),
+                name=name,
+                code=code,
                 description=data.description.strip() if data.description else "",
                 fields_schema_json=schema_to_json(data.fields_schema),
                 is_active=data.is_active,
             )
             session.add(new_type)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError as exc:
+                await session.rollback()
+                if not is_unique_violation(exc, ("ix_ticket_types_code", "ticket_types.code")):
+                    raise
+                raise FormValidationError(
+                    [FieldError("code", "A ticket type with this code already exists.", "Code", "duplicate")]
+                ) from None
             await session.refresh(new_type)
             await event_bus.publish_catalog_change("ticket_types", "created", actor_name=current_user.full_name)
             return type_to_response(new_type)

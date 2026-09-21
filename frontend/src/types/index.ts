@@ -17,6 +17,7 @@ export interface Page<T> {
 export interface PageParams {
   limit?: number;
   offset?: number;
+  before_id?: number;
 }
 
 /** Runtime settings editable by an administrator (SMTP + notification policy). */

@@ -14,6 +14,7 @@ import { apiErrorMessage, apiFieldErrors, fieldErrorMap } from '../../utils/erro
 import {
   emptyValueFor,
   evaluateForm,
+  isFieldRequired,
   validateBaseFields,
   validateCustomFields,
   CUSTOM_FIELD_PREFIX,
@@ -140,7 +141,7 @@ export const CreateTicketModal: React.FC<Props> = ({
         setApps(appList);
         setTicketTypes(typeList);
         setSelectedAppId(appList.length > 0 ? appList[0].id : undefined);
-        setSelectedTypeId(typeList.length > 0 ? typeList[0].id : undefined);
+        setSelectedTypeId(undefined);
       })
       .catch((err) => {
         console.error('Failed to load apps/types for ticket creation', err);
@@ -148,7 +149,7 @@ export const CreateTicketModal: React.FC<Props> = ({
       });
   }, [isOpen, initialTitle, initialDescription]);
 
-  const handleTypeChange = (typeId: number) => {
+  const handleTypeChange = (typeId: number | undefined) => {
     setSelectedTypeId(typeId);
     // Answers belong to the questions of the previous type, so they go away.
     setCustomFields({});
@@ -444,12 +445,13 @@ export const CreateTicketModal: React.FC<Props> = ({
               <select
                 id="field-ticket-type"
                 value={selectedTypeId || ''}
-                onChange={(e) => handleTypeChange(Number(e.target.value))}
+                onChange={(e) => handleTypeChange(e.target.value ? Number(e.target.value) : undefined)}
                 aria-invalid={dropdownError.ticket_type_id ? true : undefined}
                 className={`w-full text-xs px-2.5 py-1.5 bg-zinc-900 border rounded-lg text-zinc-100 focus:outline-none transition font-medium ${
                   dropdownError.ticket_type_id ? 'border-rose-800' : 'border-zinc-800 focus:border-zinc-500'
                 }`}
               >
+                <option value="">Standard request</option>
                 {ticketTypes.map((tt) => (
                   <option key={tt.id} value={tt.id}>
                     {tt.name} {tt.description ? `— ${tt.description}` : ''}
@@ -486,6 +488,7 @@ export const CreateTicketModal: React.FC<Props> = ({
                       onChange={(value) => handleCustomFieldChange(field, value)}
                       onBlur={() => handleCustomFieldBlur(field.key)}
                       disabled={loading}
+                      required={isFieldRequired(field, customFields)}
                     />
                   ))}
                 </div>

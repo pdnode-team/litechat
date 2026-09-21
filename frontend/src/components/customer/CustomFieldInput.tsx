@@ -11,6 +11,7 @@ interface Props {
   /** Runs client-side validation for this field as soon as the user leaves it. */
   onBlur?: () => void;
   disabled?: boolean;
+  required?: boolean;
 }
 
 /** Sentinel for the "Other" entry of a select; never sent to the API. */
@@ -38,6 +39,7 @@ export const CustomFieldInput: React.FC<Props> = ({
   onChange,
   onBlur,
   disabled = false,
+  required = false,
 }) => {
   const options = optionsOf(field);
   const inputId = `cf-${field.key}`;
@@ -266,7 +268,7 @@ export const CustomFieldInput: React.FC<Props> = ({
   return (
     <div className={field.type === 'textarea' || field.type === 'multi_select' ? 'sm:col-span-2' : ''}>
       <label htmlFor={inputId} className="block text-[10px] font-mono uppercase text-zinc-400 mb-1">
-        {field.label} {field.required && <span className="text-rose-400">*</span>}
+        {field.label} {(required || field.required) && <span className="text-rose-400">*</span>}
       </label>
 
       {renderControl()}

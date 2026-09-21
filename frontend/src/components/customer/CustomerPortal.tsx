@@ -45,6 +45,7 @@ export const CustomerPortal: React.FC = () => {
   const [loadingTickets, setLoadingTickets] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [isFaqOpen, setIsFaqOpen] = useState(false);
@@ -53,6 +54,7 @@ export const CustomerPortal: React.FC = () => {
   const [escalateDesc, setEscalateDesc] = useState('');
   const [isCsatOpen, setIsCsatOpen] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [listError, setListError] = useState<string | null>(null);
 
   const wsClientRef = useRef<TicketWebSocketClient | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -71,10 +73,14 @@ export const CustomerPortal: React.FC = () => {
 
   const fetchTickets = useCallback(async () => {
     try {
-      // Refetch everything currently on screen (plus a page) so new tickets
-      // appear without discarding the pages the user already loaded.
-      const limit = Math.max(PAGE_SIZE, loadedTicketsRef.current);
-      const page = await ticketsApi.list({ limit, offset: 0 });
+      const limit = Math.max(PAGE_SIZE, loadedTicketsRef.current || PAGE_SIZE);
+      const page = await ticketsApi.list({
+        limit,
+        offset: 0,
+        search: debouncedSearch.trim() || undefined,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+      });
+      setListError(null);
       setTickets(page.items);
       setTicketsTotal(page.total);
       const current = selectedTicketRef.current;
@@ -86,15 +92,21 @@ export const CustomerPortal: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to load tickets', err);
+      setListError(apiErrorMessage(err, 'Failed to load tickets.'));
     } finally {
       setLoadingTickets(false);
     }
-  }, []);
+  }, [debouncedSearch, statusFilter]);
 
   const loadMoreTickets = async () => {
     setLoadingMoreTickets(true);
     try {
-      const page = await ticketsApi.list({ limit: PAGE_SIZE, offset: tickets.length });
+      const page = await ticketsApi.list({
+        limit: PAGE_SIZE,
+        offset: tickets.length,
+        search: debouncedSearch.trim() || undefined,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+      });
       setTickets((prev) => {
         const seen = new Set(prev.map((t) => t.id));
         return [...prev, ...page.items.filter((t) => !seen.has(t.id))];
@@ -108,6 +120,13 @@ export const CustomerPortal: React.FC = () => {
   };
 
   useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    loadedTicketsRef.current = 0;
+    setLoadingTickets(true);
     fetchTickets();
   }, [fetchTickets, user?.id]);
 
@@ -221,6 +240,7 @@ export const CustomerPortal: React.FC = () => {
       setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } catch (err) {
       showError(apiErrorMessage(err, 'Failed to send your message.'));
+      throw err;
     }
   };
 
@@ -236,7 +256,7 @@ export const CustomerPortal: React.FC = () => {
     try {
       const page = await messagesApi.list(currentId, {
         limit: MESSAGE_PAGE_SIZE,
-        offset: messages.length,
+        before_id: messages[0]?.id,
       });
       if (selectedTicketRef.current?.id !== currentId) return;
       setMessages((prev) => {
@@ -269,14 +289,7 @@ export const CustomerPortal: React.FC = () => {
     }
   };
 
-  const filteredTickets = tickets.filter((t) => {
-    const matchesSearch =
-      !searchQuery ||
-      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.ticket_code.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredTickets = tickets;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-zinc-700 selection:text-white">
@@ -306,7 +319,21 @@ export const CustomerPortal: React.FC = () => {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col">
-        {tickets.length === 0 && !loadingTickets ? (
+        {listError && tickets.length === 0 && !loadingTickets ? (
+          <div className="flex-1 bg-zinc-900/40 border border-zinc-800/80 rounded-xl flex flex-col items-center justify-center p-12 text-center">
+            <p className="text-xs text-rose-300">{listError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setLoadingTickets(true);
+                void fetchTickets();
+              }}
+              className="mt-3 px-3 py-1.5 text-xs font-mono border border-zinc-700 rounded-md hover:bg-zinc-800"
+            >
+              Retry
+            </button>
+          </div>
+        ) : tickets.length === 0 && !loadingTickets && !debouncedSearch && statusFilter === 'all' ? (
           <div className="flex-1 bg-zinc-900/40 border border-zinc-800/80 rounded-xl flex flex-col items-center justify-center p-12 text-center shadow-2xl">
             <div className="w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 mb-4">
               <Bot className="w-6 h-6 text-emerald-400" />
@@ -384,10 +411,14 @@ export const CustomerPortal: React.FC = () => {
                         role="button"
                         tabIndex={0}
                         aria-current={isSelected}
-                        onClick={() => setSelectedTicket(ticket)}
+                        onClick={() => {
+                          selectedTicketRef.current = ticket;
+                          setSelectedTicket(ticket);
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
+                            selectedTicketRef.current = ticket;
                             setSelectedTicket(ticket);
                           }
                         }}

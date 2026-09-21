@@ -53,14 +53,28 @@ class SlidingWindowLimiter:
 limiter = SlidingWindowLimiter()
 
 
+def _header_value(scope: Scope, header_name: bytes) -> Optional[str]:
+    for name, value in scope.get("headers") or []:  # type: ignore[union-attr]
+        if name == header_name:
+            decoded = value.decode("latin-1") if isinstance(value, bytes) else str(value)
+            return decoded.strip()
+    return None
+
+
 def _client_ip(scope: Scope) -> str:
     if app_config.TRUST_PROXY_HEADERS:
-        for name, value in scope.get("headers") or []:  # type: ignore[union-attr]
-            if name == b"x-forwarded-for":
-                decoded = value.decode("latin-1") if isinstance(value, bytes) else str(value)
-                first = decoded.split(",")[0].strip()
-                if first:
-                    return first
+        # Traefik / most reverse proxies set X-Real-IP to the connecting client
+        # and *append* to X-Forwarded-For. The leftmost XFF hop is attacker-
+        # controlled, so it must not be the rate-limit key.
+        real_ip = _header_value(scope, b"x-real-ip")
+        if real_ip:
+            return real_ip.split(",")[0].strip() or real_ip
+
+        forwarded = _header_value(scope, b"x-forwarded-for")
+        if forwarded:
+            hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+            if hops:
+                return hops[-1]
 
     client = scope.get("client")
     if isinstance(client, (tuple, list)) and client:

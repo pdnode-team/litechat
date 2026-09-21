@@ -9,6 +9,8 @@ from litestar.exceptions import (
 from litestar.params import PathParameter, QueryParameter
 from pydantic import BaseModel
 from sqlalchemy import select, desc, func, or_
+from app.db.search import LIKE_ESCAPE, like_contains
+from app.services.websocket_hub import hub
 from app.db.session import async_session_factory
 from app.models.user import User
 from app.schemas.auth import UserResponse
@@ -45,12 +47,12 @@ class UserController(Controller):
             if role:
                 filters.append(User.role == role)
             if search:
-                term = f"%{search.strip()}%"
+                term = like_contains(search.strip())
                 filters.append(
                     or_(
-                        User.email.ilike(term),
-                        User.username.ilike(term),
-                        User.full_name.ilike(term),
+                        User.email.ilike(term, escape=LIKE_ESCAPE),
+                        User.username.ilike(term, escape=LIKE_ESCAPE),
+                        User.full_name.ilike(term, escape=LIKE_ESCAPE),
                     )
                 )
 
@@ -140,8 +142,12 @@ class UserController(Controller):
                 raise ValidationException("Cannot deactivate your own account.")
 
             user.is_active = data.is_active
+            if not data.is_active:
+                user.token_version = (user.token_version or 0) + 1
             await session.commit()
             await session.refresh(user)
+            if not data.is_active:
+                await hub.disconnect_user(user.id)
 
             await event_bus.publish_user_change(
                 user.id,

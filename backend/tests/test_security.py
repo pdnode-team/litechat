@@ -93,6 +93,13 @@ async def test_upload_rejects_bad_extension_and_contains_traversal():
         )
         assert bad.status_code == 400
 
+        svg = await client.post(
+            "/api/upload",
+            files={"data": ("xss.svg", b"<svg xmlns='http://www.w3.org/2000/svg'></svg>", "image/svg+xml")},
+            headers=headers,
+        )
+        assert svg.status_code == 400
+
         # A traversal filename must be reduced to a basename inside UPLOAD_DIR.
         res = await client.post(
             "/api/upload",
@@ -152,10 +159,10 @@ async def test_csat_requires_ownership_and_staff_cannot_rate():
         await client.patch(f"/api/tickets/{ticket['id']}/status", json={"status": "resolved"}, headers=owner_headers)
 
         # A different customer must not be able to read or write this rating.
-        assert (await client.get(f"/api/tickets/{ticket['id']}/csat", headers=other_headers)).status_code == 403
+        assert (await client.get(f"/api/tickets/{ticket['id']}/csat", headers=other_headers)).status_code == 404
         assert (
             await client.post(f"/api/tickets/{ticket['id']}/csat", json={"score": 1}, headers=other_headers)
-        ).status_code == 403
+        ).status_code == 404
 
         # Staff must not be able to rate on the customer's behalf.
         assert (
@@ -200,9 +207,74 @@ async def test_customers_cannot_forge_system_messages():
 
 
 @pytest.mark.asyncio
+async def test_uploads_require_auth_and_reject_foreign_attachment_urls():
+    async with AsyncTestClient(app=app) as client:
+        owner_headers, _ = await register_customer(client, "fileowner")
+        other_headers, _ = await register_customer(client, "fileother")
+
+        uploaded = await client.post(
+            "/api/upload",
+            files={"data": ("note.txt", b"secret-notes", "text/plain")},
+            headers=owner_headers,
+        )
+        assert uploaded.status_code in (200, 201), uploaded.text
+        url = uploaded.json()["url"]
+        stored = url.rsplit("/", 1)[-1]
+
+        assert (await client.get(url)).status_code == 401
+        assert (await client.get(url, headers=other_headers)).status_code == 404
+        owned = await client.get(url, headers=owner_headers)
+        assert owned.status_code == 200
+        assert owned.content == b"secret-notes"
+
+        ticket = (
+            await client.post(
+                "/api/tickets",
+                json={"title": "With file", "description": "Please see the attachment."},
+                headers=owner_headers,
+            )
+        ).json()
+
+        forged = await client.post(
+            f"/api/tickets/{ticket['id']}/messages",
+            json={
+                "content": "see this",
+                "attachments": [
+                    {"name": "evil", "url": "https://evil.example/track.gif", "file_type": "image", "size": 1}
+                ],
+            },
+            headers=owner_headers,
+        )
+        assert forged.status_code in (400, 422)
+
+        ok = await client.post(
+            f"/api/tickets/{ticket['id']}/messages",
+            json={
+                "content": "see this",
+                "attachments": [{"name": "note.txt", "url": url, "file_type": "document", "size": 12}],
+            },
+            headers=owner_headers,
+        )
+        assert ok.status_code in (200, 201), ok.text
+
+        closed = await client.patch(
+            f"/api/tickets/{ticket['id']}/status", json={"status": "closed"}, headers=owner_headers
+        )
+        assert closed.status_code == 200
+        blocked = await client.post(
+            f"/api/tickets/{ticket['id']}/messages",
+            json={"content": "still talking"},
+            headers=owner_headers,
+        )
+        assert blocked.status_code in (400, 422)
+
+        (UPLOAD_DIR / stored).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
 async def test_staff_only_endpoints_are_not_publicly_readable():
     async with AsyncTestClient(app=app) as client:
         await bootstrap_admin(client)
-        for path in ["/api/apps", "/api/ticket-types", "/api/users", "/api/analytics/summary"]:
+        for path in ["/api/apps", "/api/ticket-types", "/api/users", "/api/analytics/summary", "/api/faq"]:
             res = await client.get(path)
             assert res.status_code == 401, f"{path} leaked to anonymous callers"

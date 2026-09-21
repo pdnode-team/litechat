@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useRealtimeEvent } from '../../context/RealtimeContext';
+import { useRealtime, useRealtimeEvent } from '../../context/RealtimeContext';
 import { authApi } from '../../api/client';
 import { UserAvatar } from '../common/UserAvatar';
 import { useToast } from '../common/Toast';
@@ -22,6 +22,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const { user, logout } = useAuth();
   const { showError } = useToast();
+  const { status: realtimeStatus } = useRealtime();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [resendMessage, setResendMessage] = useState('');
@@ -67,6 +68,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           {badge && (
             <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
               {badge}
+            </span>
+          )}
+          {user && realtimeStatus !== 'open' && (
+            <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-amber-950/70 border border-amber-800/80 text-amber-300">
+              {realtimeStatus === 'connecting' ? 'Connecting live updates' : 'Live updates paused'}
             </span>
           )}
 

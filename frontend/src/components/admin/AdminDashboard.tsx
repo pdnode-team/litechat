@@ -608,40 +608,18 @@ export const AdminDashboard: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userSearch]);
 
-  if (loading && !summary) {
+  const catalogReady =
+    usersList.length > 0 ||
+    appsList.length > 0 ||
+    typesList.length > 0 ||
+    faqList.length > 0 ||
+    cannedList.length > 0 ||
+    usersTotal > 0;
+
+  if (loading && !summary && !catalogReady) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-center text-xs font-mono text-zinc-500">
         Loading administrator console...
-      </div>
-    );
-  }
-
-  if (fetchError && !summary) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-center space-y-3 font-mono">
-        <div className="text-xs text-rose-400">{fetchError}</div>
-        <button
-          type="button"
-          onClick={fetchData}
-          className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs rounded transition"
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
-
-  if (!summary) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-center space-y-3 font-mono text-xs text-zinc-500">
-        <div>No system metrics available.</div>
-        <button
-          type="button"
-          onClick={fetchData}
-          className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs rounded transition"
-        >
-          Reload
-        </button>
       </div>
     );
   }
@@ -1201,7 +1179,12 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {/* TAB 5: OVERVIEW (METRICS & SLA) */}
-      {activeTab === 'overview' && (
+      {activeTab === 'overview' && !summary && (
+        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-8 text-center text-xs font-mono text-zinc-500">
+          Analytics could not be loaded. Other tabs remain available.
+        </div>
+      )}
+      {activeTab === 'overview' && summary && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="bg-zinc-900/60 border border-zinc-800 p-3.5 rounded-xl">
