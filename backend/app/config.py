@@ -110,3 +110,8 @@ PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "http://localhost:3000").rstrip("/"
 PASSWORD_RESET_TTL_MINUTES = int(os.getenv("PASSWORD_RESET_TTL_MINUTES", "30"))
 EMAIL_VERIFICATION_TTL_MINUTES = int(os.getenv("EMAIL_VERIFICATION_TTL_MINUTES", "1440"))
 
+# Optional 5xx webhook. Empty means "do not POST anywhere". Failures here must
+# never change the HTTP response the client already received.
+ALERT_WEBHOOK_URL = (os.getenv("ALERT_WEBHOOK_URL") or "").strip()
+HEALTH_DB_TIMEOUT_SECONDS = float(os.getenv("HEALTH_DB_TIMEOUT_SECONDS", "2"))
+

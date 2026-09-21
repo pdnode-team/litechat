@@ -124,6 +124,20 @@ def server_error_handler(request: Request, exc: Exception) -> Response:
         exc_info=exc,
     )
 
+    try:
+        from app.services.alerts import schedule_alert, server_error_payload
+
+        schedule_alert(
+            server_error_payload(
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                exception=exc,
+            )
+        )
+    except Exception:
+        logger.warning("Failed to schedule 5xx alert", exc_info=True)
+
     if IS_PRODUCTION:
         detail = f"Something went wrong on our side. Reference: {request_id}"
     else:

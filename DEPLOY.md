@@ -115,7 +115,18 @@ RATE_LIMIT_REGISTER=5
 LOG_LEVEL=INFO
 # 如果平台不留 stdout 日志，可以再加一个轮转文件（可选）
 # LOG_FILE=/app/logs/litechat.log
+
+# 可选：5xx 时 POST 一段 JSON 到这个地址（Slack/Discord/自建 webhook）。
+# 默认关闭。告警自己失败只会打日志，不会改变已经返回给客户端的响应。
+# ALERT_WEBHOOK_URL=https://hooks.example.com/litechat
 ```
+
+Dokploy 的健康检查请指向 **`/api/health`**（匿名、无鉴权）。探针会对数据库执行 `SELECT 1`：
+
+- `200` 且 `{"status":"ok","database":"ok"}` — 进程和数据库都可用
+- `503` 且 `{"status":"degraded","database":"error"}` — 库连不上、超时或迁移没跑。Dokploy 会把这次探活判为失败。
+
+不要用 `/` 或 `/schema` 当探活；那些不碰数据库。
 
 关于 `TRUST_PROXY_HEADERS=true`：打开后限流优先读 `X-Real-IP`，否则取 `X-Forwarded-For` 的**最右一跳**（Traefik 追加的真实对端）。不要用最左跳，那是客户端可伪造的。
 只有确定前面有可信代理时才开（这里是 Traefik，安全）。

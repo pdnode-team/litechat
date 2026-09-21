@@ -1,9 +1,12 @@
+import asyncio
 import logging
 import os
 
-from litestar import Litestar, get
+from litestar import Litestar, Response, get
 from litestar.config.cors import CORSConfig
 from litestar.openapi.config import OpenAPIConfig
+from litestar.status_codes import HTTP_503_SERVICE_UNAVAILABLE
+from sqlalchemy import text
 
 
 from app.logging_config import configure_logging
@@ -12,7 +15,7 @@ from app.logging_config import configure_logging
 # carries the request id of the call that produced it.
 configure_logging()
 
-from app.config import ENABLE_API_DOCS, IS_PRODUCTION  # noqa: E402
+from app.config import ENABLE_API_DOCS, HEALTH_DB_TIMEOUT_SECONDS, IS_PRODUCTION  # noqa: E402
 from app.controllers.analytics import AnalyticsController  # noqa: E402
 from app.controllers.auth import AuthController  # noqa: E402
 from app.controllers.canned_responses import CannedResponseController  # noqa: E402
@@ -29,7 +32,7 @@ from app.controllers.websocket import (  # noqa: E402
     ticket_websocket_handler,
 )
 from app.db.seed import seed_initial_data  # noqa: E402
-from app.db.session import init_db  # noqa: E402
+from app.db.session import async_session_factory, init_db  # noqa: E402
 from app.exception_handlers import EXCEPTION_HANDLERS  # noqa: E402
 from app.middleware import RateLimitMiddleware, RequestContextMiddleware  # noqa: E402
 
@@ -74,8 +77,24 @@ openapi_config = (
 
 
 @get("/api/health")
-async def health_check() -> dict:
-    return {"status": "ok", "service": "LiteChat"}
+async def health_check() -> dict | Response:
+    try:
+        async with async_session_factory() as session:
+            await asyncio.wait_for(
+                session.execute(text("SELECT 1")),
+                timeout=HEALTH_DB_TIMEOUT_SECONDS,
+            )
+    except Exception:
+        logger.error("Health check database probe failed", exc_info=True)
+        return Response(
+            content={
+                "status": "degraded",
+                "service": "LiteChat",
+                "database": "error",
+            },
+            status_code=HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return {"status": "ok", "service": "LiteChat", "database": "ok"}
 
 
 app = Litestar(
