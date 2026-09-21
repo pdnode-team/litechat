@@ -12,6 +12,7 @@ from app.models.auth_token import (
     PURPOSE_PASSWORD_RESET,
 )
 from app.models.app_setting import AppSetting
+from app.models.file_upload import FileUpload
 
 __all__ = [
     "User",
@@ -24,6 +25,7 @@ __all__ = [
     "FaqItem",
     "AuthToken",
     "AppSetting",
+    "FileUpload",
     "PURPOSE_PASSWORD_RESET",
     "PURPOSE_EMAIL_VERIFICATION",
 ]

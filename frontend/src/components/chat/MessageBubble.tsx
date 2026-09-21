@@ -1,9 +1,79 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Message, UserRole } from '../../types';
+import { AttachmentItem, Message, UserRole } from '../../types';
 import { Shield, Lock, FileText, Download } from 'lucide-react';
 import { UserAvatar } from '../common/UserAvatar';
 import { formatUtc } from '../../utils/datetime';
+import api from '../../api/client';
+
+const apiPath = (url: string): string => (url.startsWith('/api/') ? url.slice(4) : url);
+
+const AttachmentView: React.FC<{ att: AttachmentItem }> = ({ att }) => {
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const isImage = att.file_type === 'image' && !att.name.toLowerCase().endsWith('.svg');
+
+  useEffect(() => {
+    if (!isImage) return;
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    api
+      .get<Blob>(apiPath(att.url), { responseType: 'blob' })
+      .then((res) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(res.data);
+        setImageSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setImageSrc(null);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [att.url, isImage]);
+
+  const download = async (event: React.MouseEvent) => {
+    event.preventDefault();
+    try {
+      const res = await api.get<Blob>(apiPath(att.url), { responseType: 'blob' });
+      const href = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = att.name;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(href);
+    } catch {
+      // The toast lives outside this leaf; a failed click is still visible
+      // because the file simply does not download.
+    }
+  };
+
+  if (isImage && imageSrc) {
+    return (
+      <div>
+        <img src={imageSrc} alt={att.name} className="max-h-48 rounded object-contain" />
+        <span className="text-[10px] font-mono mt-1 block truncate text-zinc-400">
+          {att.name} ({Math.round(att.size / 1024)} KB)
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={download}
+      className="flex items-center gap-2 font-mono text-xs text-zinc-200 hover:underline w-full text-left"
+    >
+      <FileText className="w-3.5 h-3.5 opacity-70" />
+      <span className="truncate flex-1">{att.name}</span>
+      <Download className="w-3.5 h-3.5 opacity-70" />
+    </button>
+  );
+};
 
 interface Props {
   message: Message;
@@ -72,30 +142,7 @@ export const MessageBubble: React.FC<Props> = ({ message, currentUserId, current
             <div className="mt-2 pt-2 border-t border-zinc-700/80 flex flex-col gap-1.5">
               {message.attachments.map((att, idx) => (
                 <div key={idx} className="rounded p-1.5 border border-zinc-700 bg-zinc-900 text-xs">
-                  {att.file_type === 'image' ? (
-                    <div>
-                      <img
-                        src={att.url}
-                        alt={att.name}
-                        className="max-h-48 rounded object-contain cursor-pointer hover:opacity-90 transition"
-                        onClick={() => window.open(att.url, '_blank', 'noopener,noreferrer')}
-                      />
-                      <span className="text-[10px] font-mono mt-1 block truncate text-zinc-400">
-                        {att.name} ({Math.round(att.size / 1024)} KB)
-                      </span>
-                    </div>
-                  ) : (
-                    <a
-                      href={att.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 font-mono text-xs text-zinc-200 hover:underline"
-                    >
-                      <FileText className="w-3.5 h-3.5 opacity-70" />
-                      <span className="truncate flex-1">{att.name}</span>
-                      <Download className="w-3.5 h-3.5 opacity-70" />
-                    </a>
-                  )}
+                  <AttachmentView att={att} />
                 </div>
               ))}
             </div>
@@ -139,30 +186,7 @@ export const MessageBubble: React.FC<Props> = ({ message, currentUserId, current
             <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col gap-1.5">
               {message.attachments.map((att, idx) => (
                 <div key={idx} className="rounded p-1.5 border border-zinc-800 bg-zinc-950 text-xs">
-                  {att.file_type === 'image' ? (
-                    <div>
-                      <img
-                        src={att.url}
-                        alt={att.name}
-                        className="max-h-48 rounded object-contain cursor-pointer hover:opacity-90 transition"
-                        onClick={() => window.open(att.url, '_blank', 'noopener,noreferrer')}
-                      />
-                      <span className="text-[10px] font-mono mt-1 block truncate text-zinc-400">
-                        {att.name} ({Math.round(att.size / 1024)} KB)
-                      </span>
-                    </div>
-                  ) : (
-                    <a
-                      href={att.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 font-mono text-xs text-zinc-300 hover:underline"
-                    >
-                      <FileText className="w-3.5 h-3.5 opacity-70" />
-                      <span className="truncate flex-1">{att.name}</span>
-                      <Download className="w-3.5 h-3.5 opacity-70" />
-                    </a>
-                  )}
+                  <AttachmentView att={att} />
                 </div>
               ))}
             </div>

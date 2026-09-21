@@ -4,7 +4,7 @@ import os
 from litestar import Litestar, get
 from litestar.config.cors import CORSConfig
 from litestar.openapi.config import OpenAPIConfig
-from litestar.static_files import create_static_files_router
+
 
 from app.logging_config import configure_logging
 
@@ -12,14 +12,14 @@ from app.logging_config import configure_logging
 # carries the request id of the call that produced it.
 configure_logging()
 
-from app.config import ENABLE_API_DOCS, IS_PRODUCTION, UPLOAD_DIR  # noqa: E402
+from app.config import ENABLE_API_DOCS, IS_PRODUCTION  # noqa: E402
 from app.controllers.analytics import AnalyticsController  # noqa: E402
 from app.controllers.auth import AuthController  # noqa: E402
 from app.controllers.canned_responses import CannedResponseController  # noqa: E402
 from app.controllers.csat import CSATController  # noqa: E402
 from app.controllers.faq import FaqController  # noqa: E402
 from app.controllers.managed_apps import ManagedAppController  # noqa: E402
-from app.controllers.messages import MessageController, UploadController  # noqa: E402
+from app.controllers.messages import FileController, MessageController, UploadController  # noqa: E402
 from app.controllers.settings import SettingsController  # noqa: E402
 from app.controllers.ticket_types import TicketTypeController  # noqa: E402
 from app.controllers.tickets import TicketController  # noqa: E402
@@ -60,11 +60,6 @@ cors_config = CORSConfig(
     allow_credentials=True,
 )
 
-static_files_router = create_static_files_router(
-    path="/api/files",
-    directories=[UPLOAD_DIR],
-)
-
 # The schema exposes every route, parameter and model. Useful in development,
 # so it is disabled in production unless ENABLE_API_DOCS=true is set.
 openapi_config = (
@@ -100,7 +95,7 @@ app = Litestar(
         SettingsController,
         ticket_websocket_handler,
         notifications_websocket_handler,
-        static_files_router,
+        FileController,
     ],
     cors_config=cors_config,
     # Ordered outermost first: the correlation id exists before rate limiting or

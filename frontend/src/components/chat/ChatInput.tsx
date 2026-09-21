@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Paperclip, Lock, MessageSquare, X } from 'lucide-react';
 import { AttachmentItem, CannedResponse, UserRole } from '../../types';
 import { cannedApi, messagesApi } from '../../api/client';
+import { apiErrorMessage } from '../../utils/errors';
+import { useToast } from '../common/Toast';
 
 interface Props {
   onSendMessage: (content: string, type: 'text' | 'whisper', attachments?: AttachmentItem[]) => Promise<void>;
@@ -11,6 +13,7 @@ interface Props {
 }
 
 export const ChatInput: React.FC<Props> = ({ onSendMessage, onTyping, userRole, disabled }) => {
+  const { showError } = useToast();
   const [content, setContent] = useState('');
   const [messageType, setMessageType] = useState<'text' | 'whisper'>('text');
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
@@ -23,6 +26,8 @@ export const ChatInput: React.FC<Props> = ({ onSendMessage, onTyping, userRole, 
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onTypingRef = useRef(onTyping);
+  onTypingRef.current = onTyping;
 
   const canWhisper = userRole === 'agent' || userRole === 'admin';
 
@@ -37,6 +42,7 @@ export const ChatInput: React.FC<Props> = ({ onSendMessage, onTyping, userRole, 
       if (typingTimerRef.current) {
         clearTimeout(typingTimerRef.current);
       }
+      onTypingRef.current?.(false);
     };
   }, []);
 
@@ -78,7 +84,7 @@ export const ChatInput: React.FC<Props> = ({ onSendMessage, onTyping, userRole, 
         setAttachments((prev) => [...prev, item]);
       }
     } catch (err) {
-      console.error('File upload failed', err);
+      showError(apiErrorMessage(err, 'File upload failed.'));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';

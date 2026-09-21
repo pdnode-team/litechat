@@ -2,6 +2,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from app.config import DATABASE_URL
 from app.db.base import Base
+from app import models as _models  # noqa: F401 — register metadata for create_all
 
 from sqlalchemy import event
 
