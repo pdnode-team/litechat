@@ -303,14 +303,21 @@ uploads/               # Uploaded attachments (git-ignored)
 - `POST /api/auth/register` → `customer`
 - `POST /api/auth/setup-admin` → `admin`, only while the user table is empty
 - `POST /api/auth/login` → bearer token (7 day expiry)
+- `POST /api/auth/logout` → bumps `token_version` so the current JWT dies immediately
 - `GET  /api/auth/me`
 - `POST /api/auth/forgot-password`, `/reset-password`, `/verify-email`,
   `/resend-verification`, `/change-password`
 
+Self-service registration is **open by policy**: anyone can create a customer
+account and open tickets. Email verification is advisory (a banner, not a gate).
+Abuse is limited by the per-IP cap on `/api/auth/register`, not by a captcha or
+an invite-only mode.
+
 Roles are `customer` / `agent` / `admin`. Clients send `Authorization: Bearer <token>`.
-WebSocket connections (`/ws/tickets/{id}?token=...`) use the same token.
-`GET /api/users` is administrator-only; `GET /api/users/assignable` lists active staff for
-the reassignment picker and is available to agents.
+WebSocket connections (`/ws/tickets/{id}?token=...`) use a short-lived ticket from
+`POST /api/auth/ws-ticket`. `GET /api/users` is administrator-only;
+`GET /api/users/assignable` lists active staff for the reassignment picker and is
+available to agents.
 
 ## Known gaps
 
