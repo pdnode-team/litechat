@@ -88,6 +88,21 @@ class WebSocketHub:
 
         logger.info("ws disconnect user=%s scope=%s ticket=%s", conn.user_id, conn.scope, conn.ticket_id)
 
+    async def disconnect_user(self, user_id: int) -> None:
+        """Close every live socket for ``user_id`` (password change, deactivation)."""
+        async with self._lock:
+            targets: list[ConnectionInfo] = list(self._user_rooms.get(user_id, ()))
+            for room in self._ticket_rooms.values():
+                for conn in room:
+                    if conn.user_id == user_id and conn not in targets:
+                        targets.append(conn)
+        for conn in targets:
+            try:
+                await conn.socket.close(code=4401, reason="Session revoked")
+            except Exception:
+                pass
+            await self.disconnect(conn)
+
     def _discard(self, conn: ConnectionInfo) -> None:
         """Remove a connection from every room. Caller must hold the lock."""
         if conn.ticket_id is not None:

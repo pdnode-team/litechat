@@ -142,8 +142,8 @@ async def test_password_reset_round_trip(captured_mail):
         assert new_login.status_code in (200, 201)
         assert new_login.json()["user"]["email"] == "forgetful@test.com"
 
-        # The session issued before the reset is unaffected (no revocation store yet).
-        assert (await client.get("/api/auth/me", headers=headers)).status_code == 200
+        # The session issued before the reset is revoked.
+        assert (await client.get("/api/auth/me", headers=headers)).status_code == 401
 
 
 @pytest.mark.asyncio
@@ -189,6 +189,8 @@ async def test_change_password_requires_the_current_one(captured_mail):
                 "/api/auth/login", json={"username_or_email": "changer@test.com", "password": "newpass12345"}
             )
         ).status_code in (200, 201)
+
+        assert (await client.get("/api/auth/me", headers=headers)).status_code == 401
 
 
 @pytest.mark.asyncio

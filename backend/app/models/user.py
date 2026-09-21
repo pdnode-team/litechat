@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import String, Boolean
+from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, TimestampMixin
 
@@ -16,3 +16,5 @@ class User(Base, TimestampMixin):
     # Advisory flag: an unverified address still logs in, it only surfaces a
     # banner prompting the user to confirm their email.
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Bumped on password change/reset and deactivation so outstanding JWTs die.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

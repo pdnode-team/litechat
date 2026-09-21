@@ -7,6 +7,7 @@
  * has to poll.
  */
 
+import { authApi } from './client';
 import { wsOrigin } from './config';
 
 export interface RealtimeEvent {
@@ -19,20 +20,19 @@ type MessageHandler = (event: RealtimeEvent) => void;
 type StatusHandler = (status: RealtimeStatus) => void;
 
 const MAX_RECONNECT_ATTEMPTS = 15;
+const AUTH_CLOSE_CODES = new Set([4401, 4403, 4404, 1008]);
 
 export class NotificationSocketClient {
   private ws: WebSocket | null = null;
-  private token: string | null;
   private handlers = new Set<MessageHandler>();
   private statusHandlers = new Set<StatusHandler>();
   private shouldReconnect = true;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private attempts = 0;
   private status: RealtimeStatus = 'closed';
+  private connectGeneration = 0;
 
-  constructor(token?: string | null) {
-    this.token = token ?? localStorage.getItem('litechat_token');
-  }
+  constructor() {}
 
   public onMessage(handler: MessageHandler): () => void {
     this.handlers.add(handler);
@@ -59,13 +59,22 @@ export class NotificationSocketClient {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
-
-    // Re-read the token: it may have been refreshed since construction.
-    this.token = this.token ?? localStorage.getItem('litechat_token');
     this.shouldReconnect = true;
+    void this.openSocket();
+  }
+
+  private async openSocket(): Promise<void> {
+    const generation = ++this.connectGeneration;
+    let token: string | null = null;
+    try {
+      token = (await authApi.createWsTicket()).token;
+    } catch {
+      token = localStorage.getItem('litechat_token');
+    }
+    if (generation !== this.connectGeneration || !this.shouldReconnect) return;
 
     const url = `${wsOrigin()}/ws/notifications${
-      this.token ? `?token=${encodeURIComponent(this.token)}` : ''
+      token ? `?token=${encodeURIComponent(token)}` : ''
     }`;
 
     this.setStatus('connecting');
@@ -89,9 +98,7 @@ export class NotificationSocketClient {
 
       this.ws.onclose = (event) => {
         this.setStatus('closed');
-        // 4401/4403 mean the session is not (or no longer) valid: retrying
-        // would just loop, so leave it to the auth flow to reconnect.
-        if (event.code === 4401 || event.code === 4403 || event.code === 1008) {
+        if (AUTH_CLOSE_CODES.has(event.code)) {
           this.shouldReconnect = false;
           return;
         }
@@ -121,6 +128,7 @@ export class NotificationSocketClient {
   }
 
   private closeSocket(): void {
+    this.connectGeneration += 1;
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;

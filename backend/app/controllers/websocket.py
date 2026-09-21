@@ -6,69 +6,56 @@ from litestar import websocket
 from litestar.connection import WebSocket
 from litestar.params import PathParameter
 
+from app.controllers.auth import get_user_from_token
 from app.db.session import async_session_factory
+from app.middleware.rate_limit import limiter
 from app.models.ticket import Ticket
 from app.models.user import User
-from app.services.auth_service import decode_access_token
+from app.services.access import require_ticket_view
 from app.services.websocket_hub import ConnectionInfo, hub
 
 logger = logging.getLogger("websocket_controller")
 
+WS_CONNECT_LIMIT = 30
+WS_CONNECT_WINDOW = 60
 
-def _token_user_id(socket: WebSocket) -> Optional[int]:
-    """Decode the ``token`` query parameter into a user id."""
+
+def _token_from_socket(socket: WebSocket) -> Optional[str]:
     token = socket.query_params.get("token")
-    if not token:
-        return None
-
-    payload = decode_access_token(token)
-    if not payload or "sub" not in payload:
-        return None
-
-    try:
-        return int(payload["sub"])
-    except (TypeError, ValueError):
-        return None
+    return token.strip() if token else None
 
 
 async def _authenticate(socket: WebSocket) -> Optional[User]:
-    """Resolve the connection's user from the database, not the token claims.
-
-    Room membership (``staff``/``admin``) depends on the role, and a role change
-    must take effect without waiting for the token to expire.
-    """
-    user_id = _token_user_id(socket)
-    if user_id is None:
+    token = _token_from_socket(socket)
+    if not token:
         return None
-
-    async with async_session_factory() as session:
-        user = await session.get(User, user_id)
-
-    if user is None or not user.is_active:
-        return None
-    return user
+    return await get_user_from_token(token)
 
 
 @websocket(path="/ws/tickets/{ticket_id:int}")
 async def ticket_websocket_handler(socket: WebSocket, ticket_id: Annotated[int, PathParameter()]) -> None:
     """Per-ticket conversation channel: messages, typing and presence."""
-    await socket.accept()
-
     user = await _authenticate(socket)
     if user is None:
         await socket.close(code=4401, reason="Unauthorized: invalid token")
+        return
+
+    allowed, _ = limiter.check(f"ws:{user.id}", WS_CONNECT_LIMIT, WS_CONNECT_WINDOW)
+    if not allowed:
+        await socket.close(code=4429, reason="Too many connections")
         return
 
     user_id, user_name, role = user.id, user.full_name, user.role
 
     async with async_session_factory() as session:
         ticket = await session.get(Ticket, ticket_id)
-        if not ticket:
+        try:
+            require_ticket_view(user, ticket)
+        except Exception:
             await socket.close(code=4404, reason="Ticket not found")
             return
-        if role == "customer" and ticket.customer_id != user_id:
-            await socket.close(code=4403, reason="Forbidden: access denied to ticket")
-            return
+
+    await socket.accept()
 
     conn = ConnectionInfo(
         socket=socket,
@@ -118,12 +105,17 @@ async def notifications_websocket_handler(socket: WebSocket) -> None:
     changes, role and account updates, catalogue edits, ratings and rate-limit
     notices.
     """
-    await socket.accept()
-
     user = await _authenticate(socket)
     if user is None:
         await socket.close(code=4401, reason="Unauthorized: invalid token")
         return
+
+    allowed, _ = limiter.check(f"ws:{user.id}", WS_CONNECT_LIMIT, WS_CONNECT_WINDOW)
+    if not allowed:
+        await socket.close(code=4429, reason="Too many connections")
+        return
+
+    await socket.accept()
 
     conn = ConnectionInfo(
         socket=socket,
@@ -135,8 +127,6 @@ async def notifications_websocket_handler(socket: WebSocket) -> None:
     )
     await hub.connect(conn)
 
-    # Tell the client what it is subscribed to; useful for debugging and for
-    # the UI to know whether it will receive staff/admin events.
     await socket.send_text(
         json.dumps(
             {

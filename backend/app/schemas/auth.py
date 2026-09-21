@@ -8,6 +8,8 @@ def validate_password_strength(v: str) -> str:
         raise ValueError("Password must be at least 8 characters long.")
     if not re.search(r"[A-Za-z]", v) or not re.search(r"[0-9]", v):
         raise ValueError("Password must contain both letters and digits.")
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError("Password must be at most 72 bytes.")
     return v
 
 class LoginRequest(BaseModel):

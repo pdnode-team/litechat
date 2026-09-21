@@ -55,6 +55,11 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Let the browser set multipart/form-data with a boundary. A hardcoded
+  // Content-Type without one makes Litestar reject the upload.
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+  }
   return config;
 });
 
@@ -147,6 +152,10 @@ export const authApi = {
       current_password,
       new_password,
     });
+    return res.data;
+  },
+  createWsTicket: async () => {
+    const res = await api.post<{ token: string; expires_in: number }>('/auth/ws-ticket');
     return res.data;
   },
 };
@@ -268,9 +277,11 @@ export const ticketsApi = {
     params?: {
       status?: string;
       priority?: string;
+      priority_in?: string;
       category?: string;
       search?: string;
       assigned_to_me?: boolean;
+      unassigned?: boolean;
     } & PageParams
   ): Promise<Page<Ticket>> => {
     const res = await api.get<Page<Ticket>>('/tickets', { params });
@@ -340,11 +351,7 @@ export const messagesApi = {
   upload: async (file: File) => {
     const formData = new FormData();
     formData.append('data', file);
-    const res = await api.post<AttachmentItem>('/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const res = await api.post<AttachmentItem>('/upload', formData);
     return res.data;
   },
 };

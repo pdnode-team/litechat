@@ -24,6 +24,7 @@ async def seed_initial_data() -> None:
                     hashed_password=hash_password(admin_password),
                     role="admin",
                     is_active=True,
+                    email_verified=True,
                 )
                 session.add(admin)
                 await session.commit()

@@ -1,11 +1,7 @@
 import type { Message, Ticket, UserRole } from '../types';
+import { authApi } from './client';
 import { wsOrigin } from './config';
 
-/**
- * Server -> client WebSocket payloads, mirroring what the backend hub broadcasts
- * (see backend/app/services/websocket_hub.py, controllers/messages.py,
- * controllers/tickets.py and controllers/websocket.py).
- */
 export interface WsNewMessage {
   type: 'new_message';
   message: Message;
@@ -14,11 +10,6 @@ export interface WsNewMessage {
 export interface WsTicketUpdated {
   type: 'ticket_updated';
   ticket: Ticket;
-  /**
-   * Action card the mutation wrote into the conversation ("Ticket status changed
-   * from ... to ..."). The conversation view appends it so a status change shows
-   * up live instead of only after a reload.
-   */
   message?: Message;
 }
 
@@ -39,10 +30,6 @@ export interface WsPresence {
 
 export type WebSocketMessage = WsNewMessage | WsTicketUpdated | WsTyping | WsPresence;
 
-/**
- * Runtime guard for raw JSON frames. Frames that do not match a known shape are
- * dropped by the client, so consumers only ever receive `WebSocketMessage`.
- */
 export function isWsMessage(value: unknown): value is WebSocketMessage {
   if (typeof value !== 'object' || value === null) return false;
   const type = (value as { type?: unknown }).type;
@@ -56,36 +43,50 @@ export function isWsMessage(value: unknown): value is WebSocketMessage {
 
 export type WebSocketEventHandler = (data: WebSocketMessage) => void;
 
+const AUTH_CLOSE_CODES = new Set([4401, 4403, 4404, 1008]);
+
+async function wsToken(): Promise<string | null> {
+  try {
+    return (await authApi.createWsTicket()).token;
+  } catch {
+    return localStorage.getItem('litechat_token');
+  }
+}
+
 export class TicketWebSocketClient {
   private ticketId: number;
   private ws: WebSocket | null = null;
-  private token: string | null;
   private handlers: Set<WebSocketEventHandler> = new Set();
   private shouldReconnect: boolean = true;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
+  private connectGeneration = 0;
 
-  constructor(ticketId: number, token?: string | null) {
+  constructor(ticketId: number) {
     this.ticketId = ticketId;
-    this.token = token || localStorage.getItem('litechat_token');
   }
 
   public connect(): void {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
+    void this.openSocket();
+  }
+
+  private async openSocket(): Promise<void> {
+    const generation = ++this.connectGeneration;
+    const token = await wsToken();
+    if (generation !== this.connectGeneration || !this.shouldReconnect) return;
 
     const url = `${wsOrigin()}/ws/tickets/${this.ticketId}${
-      this.token ? `?token=${encodeURIComponent(this.token)}` : ''
+      token ? `?token=${encodeURIComponent(token)}` : ''
     }`;
 
     try {
       this.ws = new WebSocket(url);
 
       this.ws.onopen = () => {
-        console.log(`[WS] Connected to ticket room ${this.ticketId}`);
         this.reconnectAttempts = 0;
       };
 
@@ -100,9 +101,7 @@ export class TicketWebSocketClient {
       };
 
       this.ws.onclose = (event) => {
-        // Stop reconnecting on auth/policy failures
-        if (event.code === 4401 || event.code === 1008) {
-          console.warn(`[WS] Connection closed due to authorization failure (${event.code}). Stopping reconnect.`);
+        if (AUTH_CLOSE_CODES.has(event.code)) {
           this.shouldReconnect = false;
           return;
         }
@@ -141,11 +140,13 @@ export class TicketWebSocketClient {
 
   public disconnect(): void {
     this.shouldReconnect = false;
+    this.connectGeneration += 1;
     if (this.reconnectTimeout !== null) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
     if (this.ws) {
+      this.ws.onclose = null;
       this.ws.close();
       this.ws = null;
     }

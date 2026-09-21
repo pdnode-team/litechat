@@ -33,6 +33,9 @@ else:
 
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+# Short-lived ticket used on the WebSocket URL so the 7-day access token is
+# not written into reverse-proxy access logs.
+WS_TICKET_TTL_MINUTES = int(os.getenv("WS_TICKET_TTL_MINUTES", "2"))
 
 # SLA Configuration (in minutes)
 SLA_FIRST_RESPONSE_MINUTES = {
@@ -84,6 +87,10 @@ RATE_LIMIT_RULES = {
     "/api/auth/setup-admin": _rate_rule(int(os.getenv("RATE_LIMIT_SETUP_ADMIN", "5")), 600),
     "/api/auth/forgot-password": _rate_rule(int(os.getenv("RATE_LIMIT_FORGOT_PASSWORD", "5")), 600),
     "/api/auth/reset-password": _rate_rule(int(os.getenv("RATE_LIMIT_RESET_PASSWORD", "10")), 600),
+    "/api/auth/resend-verification": _rate_rule(int(os.getenv("RATE_LIMIT_RESEND_VERIFICATION", "5")), 600),
+    "/api/auth/verify-email": _rate_rule(int(os.getenv("RATE_LIMIT_VERIFY_EMAIL", "20")), 600),
+    "/api/auth/ws-ticket": _rate_rule(int(os.getenv("RATE_LIMIT_WS_TICKET", "30")), 60),
+    "/api/upload": _rate_rule(int(os.getenv("RATE_LIMIT_UPLOAD", "20")), 60),
 }
 
 # --- Email delivery ----------------------------------------------------------
