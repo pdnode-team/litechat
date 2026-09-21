@@ -17,6 +17,7 @@ import {
   AppSettings,
   EmailSettingsUpdate,
   NotificationSettingsUpdate,
+  SlaSettingsUpdate,
 } from '../types';
 import { API_BASE_URL } from './config';
 
@@ -430,6 +431,10 @@ export const settingsApi = {
   },
   sendTestEmail: async (to: string): Promise<{ sent: boolean; detail: string }> => {
     const res = await api.post<{ sent: boolean; detail: string }>('/settings/email/test', { to });
+    return res.data;
+  },
+  updateSla: async (data: SlaSettingsUpdate): Promise<AppSettings> => {
+    const res = await api.put<AppSettings>('/settings/sla', data);
     return res.data;
   },
 };

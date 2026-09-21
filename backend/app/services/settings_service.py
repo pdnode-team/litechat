@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy import select
 
 from app import config as app_config
+from app.config import SLA_FIRST_RESPONSE_MINUTES, SLA_RESOLUTION_MINUTES
 from app.db.session import async_session_factory
 from app.models.app_setting import AppSetting
 from app.services import secret_box
@@ -51,6 +52,21 @@ SPECS: tuple[SettingSpec, ...] = (
     SettingSpec("notify_assignment", None, True, "bool", label="Email the assignee"),
     SettingSpec("notify_status_change", None, True, "bool", label="Email the customer on resolve/close"),
     SettingSpec("support_email", None, "", "str", label="Support inbox (optional extra recipient)"),
+    # ── SLA ───────────────────────────────────────────────────────────
+    SettingSpec("sla_first_urgent", None, SLA_FIRST_RESPONSE_MINUTES["urgent"], "int", label="Urgent first response (min)"),
+    SettingSpec("sla_first_high", None, SLA_FIRST_RESPONSE_MINUTES["high"], "int", label="High first response (min)"),
+    SettingSpec("sla_first_medium", None, SLA_FIRST_RESPONSE_MINUTES["medium"], "int", label="Medium first response (min)"),
+    SettingSpec("sla_first_low", None, SLA_FIRST_RESPONSE_MINUTES["low"], "int", label="Low first response (min)"),
+    SettingSpec("sla_resolution_urgent", None, SLA_RESOLUTION_MINUTES["urgent"], "int", label="Urgent resolution (min)"),
+    SettingSpec("sla_resolution_high", None, SLA_RESOLUTION_MINUTES["high"], "int", label="High resolution (min)"),
+    SettingSpec("sla_resolution_medium", None, SLA_RESOLUTION_MINUTES["medium"], "int", label="Medium resolution (min)"),
+    SettingSpec("sla_resolution_low", None, SLA_RESOLUTION_MINUTES["low"], "int", label="Low resolution (min)"),
+    SettingSpec("sla_business_hours_enabled", None, False, "bool", label="Count only business hours"),
+    SettingSpec("sla_weekdays", None, "mon,tue,wed,thu,fri", "str", label="Business days"),
+    SettingSpec("sla_start", None, "09:00", "str", label="Business day start"),
+    SettingSpec("sla_end", None, "18:00", "str", label="Business day end"),
+    SettingSpec("sla_timezone", None, "UTC", "str", label="Business timezone"),
+    SettingSpec("sla_observe_holidays", None, False, "bool", label="Skip holidays (not implemented)"),
 )
 
 SPEC_BY_KEY = {spec.key: spec for spec in SPECS}

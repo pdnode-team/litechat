@@ -40,13 +40,14 @@ import {
 import { formatUtc } from '../../utils/datetime';
 import { useRealtimeEvent } from '../../context/RealtimeContext';
 import { EmailSettingsPanel } from './EmailSettingsPanel';
+import { SlaSettingsPanel } from './SlaSettingsPanel';
 
 /** Rows fetched per user-table page. */
 const PAGE_SIZE = 25;
 
 export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'users' | 'canned' | 'apps' | 'types' | 'faq' | 'settings'
+    'overview' | 'users' | 'canned' | 'apps' | 'types' | 'faq' | 'settings' | 'sla'
   >('overview');
 
   // Existing states
@@ -747,11 +748,23 @@ export const AdminDashboard: React.FC = () => {
               Email &amp; Alerts
             </span>
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('sla')}
+            className={`px-3 py-1 rounded transition whitespace-nowrap ${
+              activeTab === 'sla'
+                ? 'bg-zinc-800 text-zinc-100 font-medium'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            SLA
+          </button>
         </div>
       </div>
 
       {/* TAB 7: EMAIL & NOTIFICATIONS */}
       {activeTab === 'settings' && <EmailSettingsPanel />}
+      {activeTab === 'sla' && <SlaSettingsPanel />}
 
       {/* TAB 1: USERS & PERMISSIONS (RBAC) */}
       {activeTab === 'users' && (

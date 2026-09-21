@@ -36,6 +36,20 @@ export interface AppSettings {
   notify_assignment: boolean;
   notify_status_change: boolean;
   support_email: string;
+  sla_first_urgent: number;
+  sla_first_high: number;
+  sla_first_medium: number;
+  sla_first_low: number;
+  sla_resolution_urgent: number;
+  sla_resolution_high: number;
+  sla_resolution_medium: number;
+  sla_resolution_low: number;
+  sla_business_hours_enabled: boolean;
+  sla_weekdays: string;
+  sla_start: string;
+  sla_end: string;
+  sla_timezone: string;
+  sla_observe_holidays: boolean;
 }
 
 export type EmailSettingsUpdate = Partial<
@@ -59,6 +73,26 @@ export type NotificationSettingsUpdate = Partial<
     | 'notify_assignment'
     | 'notify_status_change'
     | 'support_email'
+  >
+>;
+
+export type SlaSettingsUpdate = Partial<
+  Pick<
+    AppSettings,
+    | 'sla_first_urgent'
+    | 'sla_first_high'
+    | 'sla_first_medium'
+    | 'sla_first_low'
+    | 'sla_resolution_urgent'
+    | 'sla_resolution_high'
+    | 'sla_resolution_medium'
+    | 'sla_resolution_low'
+    | 'sla_business_hours_enabled'
+    | 'sla_weekdays'
+    | 'sla_start'
+    | 'sla_end'
+    | 'sla_timezone'
+    | 'sla_observe_holidays'
   >
 >;
 

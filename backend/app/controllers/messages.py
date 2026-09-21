@@ -226,7 +226,7 @@ class MessageController(Controller):
                 ticket.status = "open"
                 ticket.resolved_at = None
                 ticket.closed_at = None
-                _, res_due = calculate_sla_deadlines(ticket.priority, now)
+                _, res_due = await calculate_sla_deadlines(ticket.priority, now)
                 ticket.resolution_due_at = res_due
 
             attachments_json = await _resolve_attachments(session, current_user, data.attachments)

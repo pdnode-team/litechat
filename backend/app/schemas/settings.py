@@ -21,6 +21,23 @@ class EmailSettingsUpdate(BaseModel):
     public_app_url: Optional[str] = Field(default=None, max_length=255)
 
 
+class SlaSettingsUpdate(BaseModel):
+    sla_first_urgent: Optional[int] = Field(default=None, ge=1, le=10080)
+    sla_first_high: Optional[int] = Field(default=None, ge=1, le=10080)
+    sla_first_medium: Optional[int] = Field(default=None, ge=1, le=10080)
+    sla_first_low: Optional[int] = Field(default=None, ge=1, le=10080)
+    sla_resolution_urgent: Optional[int] = Field(default=None, ge=1, le=43200)
+    sla_resolution_high: Optional[int] = Field(default=None, ge=1, le=43200)
+    sla_resolution_medium: Optional[int] = Field(default=None, ge=1, le=43200)
+    sla_resolution_low: Optional[int] = Field(default=None, ge=1, le=43200)
+    sla_business_hours_enabled: Optional[bool] = None
+    sla_weekdays: Optional[str] = Field(default=None, max_length=40)
+    sla_start: Optional[str] = Field(default=None, max_length=5)
+    sla_end: Optional[str] = Field(default=None, max_length=5)
+    sla_timezone: Optional[str] = Field(default=None, max_length=64)
+    sla_observe_holidays: Optional[bool] = None
+
+
 class NotificationSettingsUpdate(BaseModel):
     notify_new_ticket: Optional[bool] = None
     notify_ticket_reply: Optional[bool] = None

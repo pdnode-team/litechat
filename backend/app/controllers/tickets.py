@@ -284,7 +284,7 @@ class TicketController(Controller):
                     ]
                 )
 
-            first_due, res_due = calculate_sla_deadlines(cleaned["priority"], now)
+            first_due, res_due = await calculate_sla_deadlines(cleaned["priority"], now)
 
             ticket = Ticket(
                 ticket_code=ticket_code,
@@ -592,7 +592,7 @@ class TicketController(Controller):
             elif old_status in ("resolved", "closed"):
                 ticket.resolved_at = None
                 ticket.closed_at = None
-                _, res_due = calculate_sla_deadlines(ticket.priority, now)
+                _, res_due = await calculate_sla_deadlines(ticket.priority, now)
                 ticket.resolution_due_at = res_due
 
             sys_msg = Message(
@@ -709,11 +709,11 @@ class TicketController(Controller):
             ticket.priority = data.priority
 
             if not ticket.first_responded_at:
-                first_due, res_due = calculate_sla_deadlines(ticket.priority, ticket.created_at)
+                first_due, res_due = await calculate_sla_deadlines(ticket.priority, ticket.created_at)
                 ticket.first_response_due_at = first_due
                 ticket.resolution_due_at = res_due
             elif not ticket.resolved_at:
-                _, res_due = calculate_sla_deadlines(ticket.priority, ticket.created_at)
+                _, res_due = await calculate_sla_deadlines(ticket.priority, ticket.created_at)
                 ticket.resolution_due_at = res_due
 
             sys_msg = Message(

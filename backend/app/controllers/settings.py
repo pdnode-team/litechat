@@ -12,6 +12,7 @@ from app.schemas.settings import (
     EmailOutboxItem,
     EmailSettingsUpdate,
     NotificationSettingsUpdate,
+    SlaSettingsUpdate,
     TestEmailRequest,
     TestEmailResult,
 )
@@ -46,6 +47,12 @@ class SettingsController(Controller):
     async def update_notification_settings(
         self, request: Request, data: NotificationSettingsUpdate
     ) -> Dict[str, Any]:
+        await self._require_admin(request)
+        await settings_service.set_many(data.model_dump(exclude_unset=True))
+        return settings_service.public_view(await settings_service.get_all())
+
+    @put("/sla")
+    async def update_sla_settings(self, request: Request, data: SlaSettingsUpdate) -> Dict[str, Any]:
         await self._require_admin(request)
         await settings_service.set_many(data.model_dump(exclude_unset=True))
         return settings_service.public_view(await settings_service.get_all())
