@@ -292,3 +292,18 @@ class AuthController(Controller):
             await session.commit()
 
         return {"detail": "Password changed."}
+
+    @post("/logout", status_code=204)
+    async def logout(self, request: Request) -> None:
+        """Invalidate every outstanding JWT and drop live WebSocket connections."""
+        user = await get_current_user_from_request(request)
+        if not user:
+            raise NotAuthorizedException("Authentication required.")
+
+        async with async_session_factory() as session:
+            db_user = await session.get(User, user.id)
+            if not db_user:
+                raise NotAuthorizedException("Authentication required.")
+            await revoke_user_sessions(session, db_user)
+            await session.commit()
+        return None

@@ -76,7 +76,13 @@ export const setUnauthorizedHandler = (handler: UnauthorizedHandler | null) => {
   onUnauthorized = handler;
 };
 
-const AUTH_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/setup-admin', '/auth/bootstrap-status'];
+const AUTH_ENDPOINTS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/setup-admin',
+  '/auth/bootstrap-status',
+  '/auth/logout',
+];
 
 api.interceptors.response.use(
   (response) => response,
@@ -157,6 +163,9 @@ export const authApi = {
   createWsTicket: async () => {
     const res = await api.post<{ token: string; expires_in: number }>('/auth/ws-ticket');
     return res.data;
+  },
+  logout: async () => {
+    await api.post('/auth/logout');
   },
 };
 

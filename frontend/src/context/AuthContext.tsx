@@ -11,7 +11,7 @@ interface AuthContextType {
   setupAdmin: (email: string, username: string, fullName: string, pass: string) => Promise<void>;
   /** Re-read the profile; used when the account changes server-side. */
   refreshUser: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void> | void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,9 +20,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('litechat_token');
-    setUser(null);
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // A network failure must not trap the user on a signed-in shell.
+    } finally {
+      localStorage.removeItem('litechat_token');
+      setUser(null);
+    }
   }, []);
 
   // The axios response interceptor lives outside React, so hand it a logout

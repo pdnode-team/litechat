@@ -278,3 +278,20 @@ async def test_staff_only_endpoints_are_not_publicly_readable():
         for path in ["/api/apps", "/api/ticket-types", "/api/users", "/api/analytics/summary", "/api/faq"]:
             res = await client.get(path)
             assert res.status_code == 401, f"{path} leaked to anonymous callers"
+
+
+@pytest.mark.asyncio
+async def test_logout_invalidates_the_current_token_only():
+    async with AsyncTestClient(app=app) as client:
+        headers_a, _ = await register_customer(client, "logout_a")
+        headers_b, _ = await register_customer(client, "logout_b")
+
+        assert (await client.get("/api/auth/me", headers=headers_a)).status_code == 200
+        assert (await client.get("/api/auth/me", headers=headers_b)).status_code == 200
+
+        out = await client.post("/api/auth/logout", headers=headers_a)
+        assert out.status_code == 204
+
+        assert (await client.get("/api/auth/me", headers=headers_a)).status_code == 401
+        assert (await client.get("/api/auth/me", headers=headers_b)).status_code == 200
+        assert (await client.post("/api/auth/logout")).status_code == 401
