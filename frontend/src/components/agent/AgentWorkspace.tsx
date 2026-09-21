@@ -152,6 +152,9 @@ export const AgentWorkspace: React.FC = () => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
   const [queueTab, setQueueTab] = useState<'all' | 'mine' | 'unassigned' | 'urgent'>('all');
   const [listError, setListError] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
@@ -195,6 +198,9 @@ export const AgentWorkspace: React.FC = () => {
         assigned_to_me: queueTab === 'mine' || undefined,
         unassigned: queueTab === 'unassigned' || undefined,
         priority_in: queueTab === 'urgent' ? 'high,urgent' : undefined,
+        tag: tagFilter.trim() || undefined,
+        created_from: createdFrom || undefined,
+        created_to: createdTo || undefined,
       });
       setListError(null);
       setTickets(page.items);
@@ -213,7 +219,7 @@ export const AgentWorkspace: React.FC = () => {
     } finally {
       setLoadingTickets(false);
     }
-  }, [debouncedSearch, queueTab]);
+  }, [debouncedSearch, queueTab, tagFilter, createdFrom, createdTo]);
 
   const loadMoreTickets = async () => {
     setLoadingMoreTickets(true);
@@ -225,6 +231,9 @@ export const AgentWorkspace: React.FC = () => {
         assigned_to_me: queueTab === 'mine' || undefined,
         unassigned: queueTab === 'unassigned' || undefined,
         priority_in: queueTab === 'urgent' ? 'high,urgent' : undefined,
+        tag: tagFilter.trim() || undefined,
+        created_from: createdFrom || undefined,
+        created_to: createdTo || undefined,
       });
       setTickets((prev) => {
         const seen = new Set(prev.map((t) => t.id));
@@ -538,8 +547,46 @@ export const AgentWorkspace: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search tickets, customers..."
+                placeholder="Search tickets, messages..."
                 className="w-full text-xs pl-8 pr-2.5 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 transition"
+              />
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {tagFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setTagFilter('')}
+                  className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200"
+                >
+                  #{tagFilter} ×
+                </button>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="tag"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      setTagFilter(e.currentTarget.value.trim());
+                      e.currentTarget.value = '';
+                    }
+                  }}
+                  className="w-20 text-[10px] px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-300 placeholder-zinc-600 focus:outline-none"
+                />
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              <input
+                type="date"
+                value={createdFrom}
+                onChange={(e) => setCreatedFrom(e.target.value)}
+                className="text-[10px] px-1.5 py-1 bg-zinc-900 border border-zinc-800 rounded text-zinc-300 focus:outline-none"
+              />
+              <input
+                type="date"
+                value={createdTo}
+                onChange={(e) => setCreatedTo(e.target.value)}
+                className="text-[10px] px-1.5 py-1 bg-zinc-900 border border-zinc-800 rounded text-zinc-300 focus:outline-none"
               />
             </div>
           </div>

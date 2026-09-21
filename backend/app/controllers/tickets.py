@@ -1,6 +1,7 @@
 import json
 import secrets
 import uuid
+from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Dict, List, Optional
 from litestar import Controller, get, post, patch, Request
 from litestar.exceptions import (
@@ -356,6 +357,11 @@ class TicketController(Controller):
         assigned_to_me: Annotated[Optional[bool], QueryParameter()] = None,
         unassigned: Annotated[Optional[bool], QueryParameter()] = None,
         priority_in: Annotated[Optional[str], QueryParameter()] = None,
+        tag: Annotated[Optional[str], QueryParameter()] = None,
+        ticket_type_id: Annotated[Optional[int], QueryParameter()] = None,
+        app_id: Annotated[Optional[int], QueryParameter()] = None,
+        created_from: Annotated[Optional[str], QueryParameter()] = None,
+        created_to: Annotated[Optional[str], QueryParameter()] = None,
         limit: LimitParam = DEFAULT_PAGE_SIZE,
         offset: OffsetParam = 0,
     ) -> Page[TicketResponse]:
@@ -385,13 +391,48 @@ class TicketController(Controller):
                 filters.append(Ticket.priority == priority)
             if category:
                 filters.append(Ticket.category == category)
+            if tag:
+                token = tag.strip().strip(",").replace(" ", "").lower()
+                if token:
+                    escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    packed = func.concat(
+                        ",",
+                        func.replace(func.lower(func.coalesce(Ticket.tags, "")), " ", ""),
+                        ",",
+                    )
+                    filters.append(packed.like(f"%,{escaped},%", escape=LIKE_ESCAPE))
+            if ticket_type_id is not None:
+                filters.append(Ticket.ticket_type_id == ticket_type_id)
+            if app_id is not None:
+                filters.append(Ticket.app_id == app_id)
+            if created_from:
+                try:
+                    start_day = date.fromisoformat(created_from.strip())
+                except ValueError as exc:
+                    raise ValidationException("created_from must be YYYY-MM-DD.") from exc
+                filters.append(Ticket.created_at >= datetime(start_day.year, start_day.month, start_day.day))
+            if created_to:
+                try:
+                    end_day = date.fromisoformat(created_to.strip())
+                except ValueError as exc:
+                    raise ValidationException("created_to must be YYYY-MM-DD.") from exc
+                filters.append(
+                    Ticket.created_at < datetime(end_day.year, end_day.month, end_day.day) + timedelta(days=1)
+                )
             if search:
                 term = like_contains(search.strip())
+                message_match = select(Message.id).where(
+                    Message.ticket_id == Ticket.id,
+                    Message.content.ilike(term, escape=LIKE_ESCAPE),
+                )
+                if current_user.role == "customer":
+                    message_match = message_match.where(Message.message_type != "whisper")
                 filters.append(
                     or_(
                         Ticket.title.ilike(term, escape=LIKE_ESCAPE),
                         Ticket.ticket_code.ilike(term, escape=LIKE_ESCAPE),
                         Ticket.description.ilike(term, escape=LIKE_ESCAPE),
+                        message_match.exists(),
                     )
                 )
 

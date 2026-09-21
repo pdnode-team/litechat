@@ -316,6 +316,11 @@ export const ticketsApi = {
       search?: string;
       assigned_to_me?: boolean;
       unassigned?: boolean;
+      tag?: string;
+      ticket_type_id?: number;
+      app_id?: number;
+      created_from?: string;
+      created_to?: string;
     } & PageParams
   ): Promise<Page<Ticket>> => {
     const res = await api.get<Page<Ticket>>('/tickets', { params });

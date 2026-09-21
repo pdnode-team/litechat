@@ -330,7 +330,9 @@ available to agents.
   deactivation bump `token_version` so outstanding JWTs die, but there is no
   sliding session.
 - **No email-change flow and no audit log yet.**
-- **Custom fields are not searchable.** `custom_fields_json` is plain JSON text, so only
-  title, description and ticket code are matched by `search=`. Message bodies
-  and tags are also not matched.
+- **Custom fields are not searchable.** `custom_fields_json` is plain JSON text.
+  `search=` matches title, ticket code, description and message bodies with
+  `ILIKE` (plus an `EXISTS` subquery for messages). That does not use an index
+  on PostgreSQL; keep the term specific. Filter by `tag`, `ticket_type_id`,
+  `app_id`, `created_from` and `created_to` instead of a leading `%`.
 
