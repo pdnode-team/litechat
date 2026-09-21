@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class EmailSettingsUpdate(BaseModel):
@@ -35,3 +36,18 @@ class TestEmailRequest(BaseModel):
 class TestEmailResult(BaseModel):
     sent: bool
     detail: str
+
+
+class EmailOutboxItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    to_address: str
+    subject: str
+    kind: str
+    status: str
+    attempts: int
+    last_error: Optional[str] = None
+    next_attempt_at: datetime
+    created_at: datetime
+    updated_at: datetime

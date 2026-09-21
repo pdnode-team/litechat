@@ -257,6 +257,25 @@ INFO  [alembic.runtime.migration] Running upgrade  -> 47311753a164, initial sche
 > 注意：这些设置存在数据库里，**优先级高于环境变量**。改了 `JWT_SECRET_KEY` 会导致已存的
 > SMTP 密码无法解密，需要重新填一次。
 
+邮件发送已经从请求路径里拆出去了：建单/回复只往 `email_outbox` 表插一行，后台循环再交给 SMTP。
+失败会按 1/2/4/8… 分钟退避重试，超过 5 次标为 `failed`。管理员可用
+`GET /api/settings/email/outbox` 看最近 50 条失败记录（含 `last_error`）。
+
+**副本必须保持 1。** 出箱用乐观锁认领行；SQLite 没有 `FOR UPDATE SKIP LOCKED`，
+两个 worker 抢同一行仍可能重复发送。
+
+### 邮件能进收件箱：SPF / DKIM / DMARC（DNS，不是代码）
+
+代码只负责把信交给你的 SMTP。信会不会进垃圾箱，取决于发件域名的 DNS：
+
+1. **SPF**：给发件域名加一条 TXT，授权你用的 SMTP 主机（例如 `v=spf1 include:_spf.google.com ~all`）。
+2. **DKIM**：在 SMTP 服务商后台打开签名，把他们给的 TXT 记到域名。
+3. **DMARC**：加 `_dmarc.yourdomain.com` TXT，例如 `v=DMARC1; p=quarantine; rua=mailto:you@yourdomain.com`。
+
+`smtp_from` 的域名必须是你控制的域名，不要用 `@gmail.com` 当 From（会被收件方直接拒）。
+
+---
+
 ---
 
 ## 上线检查清单

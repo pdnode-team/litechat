@@ -15,7 +15,12 @@ from app.logging_config import configure_logging
 # carries the request id of the call that produced it.
 configure_logging()
 
-from app.config import ENABLE_API_DOCS, HEALTH_DB_TIMEOUT_SECONDS, IS_PRODUCTION  # noqa: E402
+from app.config import (  # noqa: E402
+    EMAIL_OUTBOX_WORKER,
+    ENABLE_API_DOCS,
+    HEALTH_DB_TIMEOUT_SECONDS,
+    IS_PRODUCTION,
+)
 from app.controllers.analytics import AnalyticsController  # noqa: E402
 from app.controllers.auth import AuthController  # noqa: E402
 from app.controllers.canned_responses import CannedResponseController  # noqa: E402
@@ -33,21 +38,39 @@ from app.controllers.websocket import (  # noqa: E402
 )
 from app.db.seed import seed_initial_data  # noqa: E402
 from app.db.session import async_session_factory, init_db  # noqa: E402
+from app.services.email_outbox import worker_loop  # noqa: E402
 from app.exception_handlers import EXCEPTION_HANDLERS  # noqa: E402
 from app.middleware import RateLimitMiddleware, RequestContextMiddleware  # noqa: E402
 
 logger = logging.getLogger("litechat")
 
+_outbox_task: asyncio.Task | None = None
+
 
 async def on_app_startup() -> None:
+    global _outbox_task
     logger.info("Initializing database schemas...")
     await init_db()
     if os.getenv("ADMIN_EMAIL") and os.getenv("ADMIN_PASSWORD"):
         logger.info("Seeding initial administrator from environment...")
         await seed_initial_data()
+    if EMAIL_OUTBOX_WORKER:
+        _outbox_task = asyncio.create_task(worker_loop())
+        logger.info("Email outbox worker started")
     if IS_PRODUCTION:
         logger.info("Environment: production")
     logger.info("LiteChat backend ready!")
+
+
+async def on_app_shutdown() -> None:
+    global _outbox_task
+    if _outbox_task is not None:
+        _outbox_task.cancel()
+        try:
+            await _outbox_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _outbox_task = None
 
 
 allowed_origins_raw = os.getenv(
@@ -122,6 +145,7 @@ app = Litestar(
     middleware=[RequestContextMiddleware, RateLimitMiddleware],
     exception_handlers=EXCEPTION_HANDLERS,
     on_startup=[on_app_startup],
+    on_shutdown=[on_app_shutdown],
     openapi_config=openapi_config,
 )
 

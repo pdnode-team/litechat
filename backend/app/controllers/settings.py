@@ -1,11 +1,15 @@
 """Administrator-editable runtime settings (SMTP + notification policy)."""
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from litestar import Controller, get, post, put, Request
 from litestar.exceptions import NotAuthorizedException, PermissionDeniedException
+from sqlalchemy import desc, select
 
 from app.controllers.auth import get_current_user_from_request
+from app.db.session import async_session_factory
+from app.models.email_outbox import STATUS_FAILED, EmailOutbox
 from app.schemas.settings import (
+    EmailOutboxItem,
     EmailSettingsUpdate,
     NotificationSettingsUpdate,
     TestEmailRequest,
@@ -51,3 +55,22 @@ class SettingsController(Controller):
         await self._require_admin(request)
         sent, detail = await email_service.send_test_email(data.to)
         return TestEmailResult(sent=sent, detail=detail)
+
+    @get("/email/outbox")
+    async def list_failed_outbox(self, request: Request) -> List[EmailOutboxItem]:
+        """The 50 most recent failed sends, so an operator can see why mail stopped."""
+        await self._require_admin(request)
+        async with async_session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(EmailOutbox)
+                        .where(EmailOutbox.status == STATUS_FAILED)
+                        .order_by(desc(EmailOutbox.updated_at), desc(EmailOutbox.id))
+                        .limit(50)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [EmailOutboxItem.model_validate(row) for row in rows]

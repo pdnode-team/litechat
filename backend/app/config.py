@@ -115,3 +115,8 @@ EMAIL_VERIFICATION_TTL_MINUTES = int(os.getenv("EMAIL_VERIFICATION_TTL_MINUTES",
 ALERT_WEBHOOK_URL = (os.getenv("ALERT_WEBHOOK_URL") or "").strip()
 HEALTH_DB_TIMEOUT_SECONDS = float(os.getenv("HEALTH_DB_TIMEOUT_SECONDS", "2"))
 
+# Outbox worker. Tests disable this so they can drive process_due_outbox()
+# themselves; production leaves it on. Replicas > 1 can still double-send.
+EMAIL_OUTBOX_WORKER = _env_flag("EMAIL_OUTBOX_WORKER", default=True)
+EMAIL_OUTBOX_MAX_ATTEMPTS = int(os.getenv("EMAIL_OUTBOX_MAX_ATTEMPTS", "5"))
+

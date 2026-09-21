@@ -36,12 +36,11 @@ def _send_sync(config: dict, message: EmailMessage) -> None:
         smtp.send_message(message)
 
 
-async def send_email(to: str, subject: str, body: str) -> bool:
-    """Deliver an email. Returns True when it was handed to SMTP.
+async def deliver_email(to: str, subject: str, body: str) -> bool:
+    """Hand one message to SMTP. Returns True when the server accepted it.
 
-    Delivery failures are logged rather than raised: the endpoints that trigger
-    mail must not leak whether an address exists, and must not fail because the
-    mail server is briefly unavailable.
+    Used by the outbox worker. Callers that originate mail should use
+    :func:`send_email`, which only enqueues.
     """
     if not to:
         return False
@@ -59,7 +58,19 @@ async def send_email(to: str, subject: str, body: str) -> bool:
         return True
     except Exception:
         logger.exception("Failed to send email to %s", to)
-        return False
+        raise
+
+
+async def send_email(to: str, subject: str, body: str, kind: str = "transactional") -> bool:
+    """Enqueue an email. The outbox worker performs the actual SMTP send.
+
+    Never talks to SMTP on the request path, so a slow mail server cannot stall
+    ticket creation or password-reset. Returns True when a row was written.
+    """
+    from app.services.email_outbox import enqueue
+
+    row_id = await enqueue(to, subject, body, kind)
+    return row_id is not None
 
 
 async def send_test_email(to: str) -> tuple[bool, str]:
@@ -105,6 +116,7 @@ async def send_password_reset_email(to: str, raw_token: str) -> None:
             "If you did not request this, you can safely ignore this email. "
             "The link expires shortly and can only be used once."
         ),
+        kind="password_reset",
     )
 
 
@@ -118,6 +130,7 @@ async def send_email_verification_email(to: str, raw_token: str) -> None:
             f"Confirm your email address by opening this link:\n{link}\n\n"
             "If you did not create this account, you can ignore this email."
         ),
+        kind="email_verification",
     )
 
 
@@ -147,4 +160,4 @@ async def send_ticket_notification(
     )
 
     for recipient in recipients:
-        await send_email(recipient, subject, body)
+        await send_email(recipient, subject, body, kind="ticket_notification")

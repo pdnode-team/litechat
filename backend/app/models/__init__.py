@@ -13,6 +13,7 @@ from app.models.auth_token import (
 )
 from app.models.app_setting import AppSetting
 from app.models.file_upload import FileUpload
+from app.models.email_outbox import EmailOutbox
 
 __all__ = [
     "User",
@@ -26,6 +27,7 @@ __all__ = [
     "AuthToken",
     "AppSetting",
     "FileUpload",
+    "EmailOutbox",
     "PURPOSE_PASSWORD_RESET",
     "PURPOSE_EMAIL_VERIFICATION",
 ]

@@ -110,9 +110,18 @@ UI (Admin console → *Email & Alerts*), and the values are stored in the
 administrator has not saved, so an existing deployment keeps working unchanged.
 
 `GET/PUT /api/settings`, `PUT /api/settings/email`,
-`PUT /api/settings/notifications` and `POST /api/settings/email/test` are
-administrator-only. The SMTP password is stored encrypted (key derived from
-`JWT_SECRET_KEY`) and is never returned by the API — only `smtp_password_set`.
+`PUT /api/settings/notifications`, `POST /api/settings/email/test` and
+`GET /api/settings/email/outbox` are administrator-only. The SMTP password is
+stored encrypted (key derived from `JWT_SECRET_KEY`) and is never returned by
+the API — only `smtp_password_set`.
+
+Ticket and account emails are inserted into `email_outbox` on the request path
+and delivered by a background loop (every 60s, plus an immediate kick after
+enqueue). Failures retry with exponential backoff and are marked `failed` after
+five attempts. `GET /api/settings/email/outbox` lists the 50 most recent
+failures. The worker claims rows with an optimistic status flip — **keep
+replicas at 1**; two processes can still double-send under SQLite. Disable the
+loop with `EMAIL_OUTBOX_WORKER=false` (the test suite does this).
 
 If `smtp_host` is unset, outbound mail is written to the application log
 instead, so password-reset links stay usable in development.
@@ -314,9 +323,8 @@ the reassignment picker and is available to agents.
   running more than one worker means a client only receives events published by the
   worker it is connected to; a shared pub/sub (e.g. Redis) is required to fan out
   across workers.
-- **Notification email is synchronous** with the request that triggers it. Delivery
-  failures are logged and never fail the API call, but a slow SMTP server adds latency
-  to ticket creation.
+- **The email outbox worker is per process.** Replicas greater than 1 can
+  double-send the same row; keep replicas at 1.
 - No refresh tokens, no email change flow, no audit log.
 - **Custom fields are not searchable.** `custom_fields_json` is plain JSON text, so only
   title, description and ticket code are matched by `search=`.

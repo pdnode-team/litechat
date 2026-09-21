@@ -9,6 +9,8 @@ os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-pytest-execution-only-12345"
 # The suite logs in and registers far more often than a real client would; the
 # limiter is exercised explicitly in test_rate_limit.py instead.
 os.environ["RATE_LIMIT_ENABLED"] = "false"
+# Drive the outbox from tests instead of a background loop.
+os.environ["EMAIL_OUTBOX_WORKER"] = "false"
 
 from litestar.testing import AsyncTestClient  # noqa: E402
 from app.main import app  # noqa: E402
