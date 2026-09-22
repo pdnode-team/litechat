@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertCircle, GitBranch, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, GitBranch, Pencil, Plus, Trash2, X } from 'lucide-react';
 import type {
   ConditionGroup,
   ConditionOperator,
@@ -441,6 +441,31 @@ export const CustomFieldBuilder: React.FC<Props> = ({ fields, onChange }) => {
     else if (editingIndex !== null && editingIndex > index) setEditingIndex(editingIndex - 1);
   };
 
+  const move = (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= fields.length || fromIndex === toIndex) return;
+    const nextFields = [...fields];
+    const [moved] = nextFields.splice(fromIndex, 1);
+    nextFields.splice(toIndex, 0, moved);
+
+    const problems = validateFieldSchema(nextFields);
+    if (problems.length > 0) {
+      setProblem(problems[0].message);
+      return;
+    }
+
+    setProblem(null);
+    onChange(nextFields);
+    if (editingIndex === fromIndex) {
+      setEditingIndex(toIndex);
+    } else if (editingIndex !== null) {
+      if (fromIndex < editingIndex && toIndex >= editingIndex) {
+        setEditingIndex(editingIndex - 1);
+      } else if (fromIndex > editingIndex && toIndex <= editingIndex) {
+        setEditingIndex(editingIndex + 1);
+      }
+    }
+  };
+
   const isChoice = CHOICE_TYPES.includes(draft.type);
   const isLength = LENGTH_TYPES.includes(draft.type);
   const isNumber = draft.type === 'number';
@@ -716,36 +741,62 @@ export const CustomFieldBuilder: React.FC<Props> = ({ fields, onChange }) => {
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="truncate">
-                      <span className="font-semibold text-zinc-200">{field.label}</span>{' '}
-                      <span className="text-[10px] font-mono text-zinc-500">
-                        {field.key} · {field.type}
-                      </span>
-                      {field.required && <span className="text-rose-400 ml-1 font-mono text-[10px]">*req</span>}
-                      {condition && (
-                        <span className="text-sky-400 ml-1 font-mono text-[10px]">if {condition}</span>
-                      )}
-                      {requiredWhen && (
-                        <span className="text-amber-400 ml-1 font-mono text-[10px]">
-                          required if {requiredWhen}
+                  <div className="flex items-start gap-2 min-w-0">
+                    <span className="text-[10px] font-mono text-zinc-500 bg-zinc-950 border border-zinc-800 px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
+                      #{index + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate">
+                        <span className="font-semibold text-zinc-200">{field.label}</span>{' '}
+                        <span className="text-[10px] font-mono text-zinc-500">
+                          {field.key} · {field.type}
                         </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] font-mono text-zinc-500 truncate">
-                      {(field.options ?? []).length > 0 && (
-                        <span>Options: {(field.options ?? []).join(', ')}</span>
-                      )}
-                      {field.allow_other && <span className="ml-1 text-emerald-500">+ Other</span>}
-                      {field.help_text && <span className="ml-1">— {field.help_text}</span>}
+                        {field.required && <span className="text-rose-400 ml-1 font-mono text-[10px]">*req</span>}
+                        {condition && (
+                          <span className="text-sky-400 ml-1 font-mono text-[10px]">if {condition}</span>
+                        )}
+                        {requiredWhen && (
+                          <span className="text-amber-400 ml-1 font-mono text-[10px]">
+                            required if {requiredWhen}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] font-mono text-zinc-500 truncate">
+                        {(field.options ?? []).length > 0 && (
+                          <span>Options: {(field.options ?? []).join(', ')}</span>
+                        )}
+                        {field.allow_other && <span className="ml-1 text-emerald-500">+ Other</span>}
+                        {field.help_text && <span className="ml-1">— {field.help_text}</span>}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                       type="button"
+                      disabled={index === 0}
+                      onClick={() => move(index, index - 1)}
+                      aria-label={`Move field ${field.label} up`}
+                      title="Move up"
+                      className="text-zinc-500 hover:text-zinc-200 disabled:opacity-20 disabled:hover:text-zinc-500 p-1 rounded transition"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === fields.length - 1}
+                      onClick={() => move(index, index + 1)}
+                      aria-label={`Move field ${field.label} down`}
+                      title="Move down"
+                      className="text-zinc-500 hover:text-zinc-200 disabled:opacity-20 disabled:hover:text-zinc-500 p-1 rounded transition"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => startEditing(index)}
                       aria-label={`Edit field ${field.label}`}
-                      className="text-zinc-500 hover:text-zinc-200 p-1"
+                      title="Edit field"
+                      className="text-zinc-500 hover:text-zinc-200 p-1 rounded transition"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
@@ -753,7 +804,8 @@ export const CustomFieldBuilder: React.FC<Props> = ({ fields, onChange }) => {
                       type="button"
                       onClick={() => remove(index)}
                       aria-label={`Remove field ${field.label}`}
-                      className="text-zinc-500 hover:text-rose-400 p-1"
+                      title="Remove field"
+                      className="text-zinc-500 hover:text-rose-400 p-1 rounded transition"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
