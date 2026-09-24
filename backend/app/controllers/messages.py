@@ -49,7 +49,7 @@ STORED_FILE_RE = re.compile(r"^/api/files/([A-Za-z0-9._-]+)$")
 SAFE_STORED_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def message_to_response(msg: Message) -> MessageResponse:
+def message_to_response(msg: Message, sender_name_override: Optional[str] = None) -> MessageResponse:
     attachments = None
     if msg.attachments_json:
         try:
@@ -62,7 +62,7 @@ def message_to_response(msg: Message) -> MessageResponse:
         id=msg.id,
         ticket_id=msg.ticket_id,
         sender_id=msg.sender_id,
-        sender_name=msg.sender_name,
+        sender_name=sender_name_override or msg.sender_name,
         sender_role=msg.sender_role,
         message_type=msg.message_type,
         content=msg.content,
@@ -90,6 +90,7 @@ async def _user_can_read_file(session, user: User, stored_name: str) -> bool:
             .where(
                 Message.attachments_json.contains(stored_name),
                 Ticket.customer_id == user.id,
+                Message.message_type != "whisper",
             )
             .limit(1)
         )
@@ -181,7 +182,18 @@ class MessageController(Controller):
             result = await session.execute(stmt)
             messages = list(reversed(result.scalars().all()))
 
-            items = [message_to_response(m) for m in messages]
+            sender_ids = {m.sender_id for m in messages if m.sender_id}
+            user_names = {}
+            if sender_ids:
+                users_res = await session.execute(
+                    select(User.id, User.full_name).where(User.id.in_(list(sender_ids)))
+                )
+                user_names = dict(users_res.all())
+
+            items = [
+                message_to_response(m, sender_name_override=user_names.get(m.sender_id))
+                for m in messages
+            ]
             return Page[MessageResponse](items=items, total=total, limit=limit, offset=offset)
 
     @post("/")
@@ -252,14 +264,19 @@ class MessageController(Controller):
 
             if is_whisper:
                 email_kind = None
+                recipients = set()
+                if ticket.assigned_agent_id and ticket.assigned_agent_id != current_user.id:
+                    recipients.add(ticket.assigned_agent_id)
             elif from_staff:
                 email_kind = notification_service.KIND_STAFF_REPLY
+                recipients = {ticket.customer_id}
+                if ticket.assigned_agent_id and ticket.assigned_agent_id != current_user.id:
+                    recipients.add(ticket.assigned_agent_id)
             else:
                 email_kind = notification_service.KIND_CUSTOMER_REPLY
-
-            recipients = {ticket.customer_id}
-            if ticket.assigned_agent_id:
-                recipients.add(ticket.assigned_agent_id)
+                recipients = {ticket.customer_id}
+                if ticket.assigned_agent_id:
+                    recipients.add(ticket.assigned_agent_id)
 
             await event_bus.publish(
                 Event(

@@ -44,7 +44,7 @@ from app.db.session import async_session_factory, init_db  # noqa: E402
 from app.services.email_outbox import worker_loop  # noqa: E402
 from app.services.sla_watch import worker_loop as sla_watch_loop  # noqa: E402
 from app.exception_handlers import EXCEPTION_HANDLERS  # noqa: E402
-from app.middleware import RateLimitMiddleware, RequestContextMiddleware  # noqa: E402
+from app.middleware import RateLimitMiddleware, RequestContextMiddleware, SecurityHeadersMiddleware  # noqa: E402
 
 logger = logging.getLogger("litechat")
 
@@ -154,7 +154,7 @@ app = Litestar(
     cors_config=cors_config,
     # Ordered outermost first: the correlation id exists before rate limiting or
     # routing runs, so even a rejected request is traceable.
-    middleware=[RequestContextMiddleware, RateLimitMiddleware],
+    middleware=[RequestContextMiddleware, SecurityHeadersMiddleware, RateLimitMiddleware],
     exception_handlers=EXCEPTION_HANDLERS,
     on_startup=[on_app_startup],
     on_shutdown=[on_app_shutdown],

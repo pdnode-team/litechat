@@ -295,3 +295,144 @@ async def test_logout_invalidates_the_current_token_only():
         assert (await client.get("/api/auth/me", headers=headers_a)).status_code == 401
         assert (await client.get("/api/auth/me", headers=headers_b)).status_code == 200
         assert (await client.post("/api/auth/logout")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_security_headers_present():
+    async with AsyncTestClient(app=app) as client:
+        res = await client.get("/api/health")
+        assert res.headers.get("x-content-type-options") == "nosniff"
+        assert res.headers.get("x-frame-options") == "SAMEORIGIN"
+        assert res.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+
+@pytest.mark.asyncio
+async def test_whisper_attachment_never_accessible_by_customer():
+    async with AsyncTestClient(app=app) as client:
+        admin_headers = await bootstrap_admin(client)
+        customer_headers, _ = await register_customer(client, "whisper_cust")
+
+        # Customer creates a ticket
+        ticket = (
+            await client.post(
+                "/api/tickets",
+                json={"title": "Need help", "description": "Here is my issue."},
+                headers=customer_headers,
+            )
+        ).json()
+
+        # Admin uploads a sensitive attachment
+        uploaded = await client.post(
+            "/api/upload",
+            files={"data": ("confidential.txt", b"internal audit report", "text/plain")},
+            headers=admin_headers,
+        )
+        assert uploaded.status_code in (200, 201)
+        att_url = uploaded.json()["url"]
+        stored_name = att_url.rsplit("/", 1)[-1]
+
+        # Admin posts a whisper note with the attachment
+        whisper = await client.post(
+            f"/api/tickets/{ticket['id']}/messages",
+            json={
+                "content": "Internal agent assessment",
+                "message_type": "whisper",
+                "attachments": [{"name": "confidential.txt", "url": att_url, "file_type": "document", "size": 21}],
+            },
+            headers=admin_headers,
+        )
+        assert whisper.status_code in (200, 201)
+
+        # Admin CAN read the file
+        admin_file = await client.get(att_url, headers=admin_headers)
+        assert admin_file.status_code == 200
+
+        # Customer MUST NOT be able to read the whisper attachment even though they own the ticket
+        cust_file = await client.get(att_url, headers=customer_headers)
+        assert cust_file.status_code == 404
+
+        (UPLOAD_DIR / stored_name).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_whisper_does_not_create_customer_inbox_notification():
+    async with AsyncTestClient(app=app) as client:
+        admin_headers = await bootstrap_admin(client)
+        customer_headers, _ = await register_customer(client, "whisper_notif_cust")
+
+        ticket = (
+            await client.post(
+                "/api/tickets",
+                json={"title": "Test notification", "description": "Customer query."},
+                headers=customer_headers,
+            )
+        ).json()
+
+        # Customer inbox has 0 notifications before whisper
+        inbox_before = (await client.get("/api/notifications", headers=customer_headers)).json()
+        count_before = inbox_before["total"]
+
+        # Admin posts a whisper message
+        await client.post(
+            f"/api/tickets/{ticket['id']}/messages",
+            json={"content": "Secret internal staff note", "message_type": "whisper"},
+            headers=admin_headers,
+        )
+
+        # Customer inbox MUST NOT receive a phantom notification
+        inbox_after = (await client.get("/api/notifications", headers=customer_headers)).json()
+        assert inbox_after["total"] == count_before
+
+
+@pytest.mark.asyncio
+async def test_role_change_immediately_updates_permissions():
+    async with AsyncTestClient(app=app) as client:
+        admin_headers = await bootstrap_admin(client)
+        headers_target, target_user = await register_customer(client, "staff_target")
+
+        # Promote to agent
+        promoted = await client.patch(
+            f"/api/users/{target_user['id']}/role", json={"role": "agent"}, headers=admin_headers
+        )
+        assert promoted.status_code == 200
+
+        # Agent can view assignable staff list
+        assignable = await client.get("/api/users/assignable", headers=headers_target)
+        assert assignable.status_code == 200
+
+        # Demote back to customer
+        demoted = await client.patch(
+            f"/api/users/{target_user['id']}/role", json={"role": "customer"}, headers=admin_headers
+        )
+        assert demoted.status_code == 200
+
+        # Demoted customer immediately loses access to staff-only endpoint
+        assignable_after = await client.get("/api/users/assignable", headers=headers_target)
+        assert assignable_after.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_profile_name_update_synchronizes_messages():
+    async with AsyncTestClient(app=app) as client:
+        cust_headers, _ = await register_customer(client, "rename_user")
+
+        ticket = (
+            await client.post(
+                "/api/tickets",
+                json={"title": "Name check ticket", "description": "Original message content."},
+                headers=cust_headers,
+            )
+        ).json()
+
+        # Rename user
+        rename_res = await client.patch("/api/users/me", json={"full_name": "Brand New Name"}, headers=cust_headers)
+        assert rename_res.status_code == 200
+        assert rename_res.json()["full_name"] == "Brand New Name"
+
+        # Check messages for the ticket
+        msgs_res = await client.get(f"/api/tickets/{ticket['id']}/messages", headers=cust_headers)
+        assert msgs_res.status_code == 200
+        messages = msgs_res.json()["items"]
+        assert len(messages) >= 1
+        assert messages[0]["sender_name"] == "Brand New Name"
+

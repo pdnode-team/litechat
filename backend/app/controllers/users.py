@@ -10,11 +10,12 @@ from litestar.exceptions import (
 )
 from litestar.params import PathParameter, QueryParameter
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func, or_
+from sqlalchemy import select, desc, func, or_, update
 from app.db.search import LIKE_ESCAPE, like_contains
 from app.services.websocket_hub import hub
 from app.db.session import async_session_factory
 from app.exceptions import FormValidationError
+from app.models.message import Message
 from app.models.user import User
 from app.schemas.auth import ProfileUpdateRequest, UserResponse
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, LimitParam, OffsetParam, Page
@@ -142,6 +143,9 @@ class UserController(Controller):
                 raise NotAuthorizedException("Authentication required.")
             if full_name is not None:
                 user.full_name = full_name
+                await session.execute(
+                    update(Message).where(Message.sender_id == user.id).values(sender_name=full_name)
+                )
             if data.avatar_url is not None:
                 user.avatar_url = avatar_url
             await session.commit()
@@ -169,9 +173,16 @@ class UserController(Controller):
                 raise ValidationException("Cannot demote your own admin account.")
 
             before_role = user.role
-            user.role = data.role
+            role_changed = before_role != data.role
+            if role_changed:
+                user.role = data.role
+
             await session.commit()
             await session.refresh(user)
+
+            if role_changed:
+                await hub.disconnect_user(user.id)
+
             await audit.record(
                 actor=current_user,
                 action="user.role_changed",
